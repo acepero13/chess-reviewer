@@ -18,6 +18,8 @@ class GameRepository(private val dao: ReviewGameDao) {
 
     suspend fun deleteById(id: Long) = dao.deleteById(id)
 
+    suspend fun count(): Int = dao.count()
+
     suspend fun isDuplicate(sourceType: String, sourceId: String): Boolean =
         dao.findBySourceId(sourceType, sourceId) != null
 }

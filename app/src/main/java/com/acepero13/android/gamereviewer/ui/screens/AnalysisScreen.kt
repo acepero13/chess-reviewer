@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
+import androidx.compose.material.icons.outlined.Assessment
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.Flag
@@ -100,6 +101,7 @@ import org.koin.core.parameter.parametersOf
 fun AnalysisScreen(
     gameId: Long,
     onBack: () -> Unit,
+    onViewReport: (Long) -> Unit = {},
     vm: AnalysisViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state      by vm.uiState.collectAsState()
@@ -163,6 +165,16 @@ fun AnalysisScreen(
                                 .padding(end = 16.dp)
                                 .size(20.dp),
                         )
+                    }
+                    // "View Report" button — only after background analysis is complete
+                    if (state.isBackgroundAnalysisDone) {
+                        IconButton(onClick = { onViewReport(gameId) }) {
+                            Icon(
+                                Icons.Outlined.Assessment,
+                                contentDescription = "View full report",
+                                tint = ChessGold,
+                            )
+                        }
                     }
                     // Silent background analysis progress dot
                     if (!state.isBackgroundAnalysisDone && state.backgroundAnalysisProgress > 0f) {

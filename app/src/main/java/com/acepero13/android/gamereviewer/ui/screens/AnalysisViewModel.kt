@@ -4,7 +4,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
+import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
+import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.InsightReconciler
@@ -109,6 +111,7 @@ class AnalysisViewModel(
     private val repo: GameRepository,
     private val annotationDao: PositionAnnotationDao,
     private val criticalMomentDao: CriticalMomentDao,
+    private val gameEvaluationDao: GameEvaluationDao,
     private val engine: StockfishEngine,
     private val opening: OpeningClassifier,
     private val truthMapBuilder: TruthMapBuilder,
@@ -627,9 +630,25 @@ class AnalysisViewModel(
     // ─── Background Truth Map ─────────────────────────────────────────────────
 
     private fun launchBackgroundAnalysis(stored: List<CriticalMoment>) {
+        // If we already have ENGINE_MARKED moments, try to restore the truth map from DB
+        // so the Blunder Guard and Missed Moment detector still work in subsequent sessions.
         if (stored.any { it.type == CriticalMoment.Type.ENGINE_MARKED.name }) {
-            truthMap = emptyList()  // can't restore in-memory from DB alone; just skip
-            _uiState.update { it.copy(isBackgroundAnalysisDone = true, backgroundAnalysisProgress = 1f) }
+            viewModelScope.launch(Dispatchers.IO) {
+                val dbEvals = gameEvaluationDao.getByGameId(gameId)
+                if (dbEvals.isNotEmpty()) {
+                    // Reconstruct in-memory truth map from persisted evaluations
+                    truthMap = dbEvals.map { ev ->
+                        TruthMapEntry(
+                            moveIndex = ev.moveIndex,
+                            fen       = fenSequence.getOrElse(ev.moveIndex) { "" },
+                            evalCp    = ev.evalCp,
+                            evalDelta = ev.evalDelta,
+                            motif     = ev.motif,
+                        )
+                    }
+                }
+                _uiState.update { it.copy(isBackgroundAnalysisDone = true, backgroundAnalysisProgress = 1f) }
+            }
             return
         }
 
@@ -638,6 +657,20 @@ class AnalysisViewModel(
                 _uiState.update { it.copy(backgroundAnalysisProgress = processed.toFloat() / total) }
             }
             truthMap = map
+
+            // Persist evaluations for future sessions (Game Report screen)
+            val evaluations = map.map { entry ->
+                GameEvaluation(
+                    gameId    = gameId,
+                    moveIndex = entry.moveIndex,
+                    evalCp    = entry.evalCp,
+                    evalDelta = entry.evalDelta,
+                    motif     = entry.motif,
+                )
+            }
+            if (evaluations.isNotEmpty()) {
+                launch(Dispatchers.IO) { gameEvaluationDao.insertAll(evaluations) }
+            }
 
             val moments = map.filter { it.isCritical || it.hasTacticalMotif }.map { entry ->
                 CriticalMoment(
@@ -650,7 +683,9 @@ class AnalysisViewModel(
                     fen              = entry.fen,
                 )
             }
-            if (moments.isNotEmpty()) criticalMomentDao.insertAll(moments)
+            if (moments.isNotEmpty()) {
+                launch(Dispatchers.IO) { criticalMomentDao.insertAll(moments) }
+            }
 
             _uiState.update {
                 it.copy(

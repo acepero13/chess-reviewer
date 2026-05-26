@@ -28,6 +28,9 @@ interface ReviewGameDao {
     @Query("DELETE FROM review_games WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("SELECT COUNT(*) FROM review_games")
+    suspend fun count(): Int
+
     /** Prevent duplicate imports from the same platform. */
     @Query("SELECT * FROM review_games WHERE sourceType = :sourceType AND sourceId = :sourceId LIMIT 1")
     suspend fun findBySourceId(sourceType: String, sourceId: String): ReviewGame?

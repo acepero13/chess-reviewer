@@ -32,4 +32,12 @@ interface CriticalMomentDao {
 
     @Query("SELECT COUNT(*) FROM critical_moments WHERE gameId = :gameId AND type = 'ENGINE_MARKED'")
     suspend fun countEngineMarked(gameId: Long): Int
+
+    /** All moments across every game — used by the behavioral diagnosis dashboard. */
+    @Query("SELECT * FROM critical_moments ORDER BY gameId ASC, moveIndex ASC")
+    suspend fun getAll(): List<CriticalMoment>
+
+    /** Number of distinct games that have at least one ENGINE_MARKED moment. */
+    @Query("SELECT COUNT(DISTINCT gameId) FROM critical_moments WHERE type = 'ENGINE_MARKED'")
+    suspend fun countGamesAnalyzed(): Int
 }

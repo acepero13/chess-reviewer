@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FileOpen
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +37,7 @@ import org.koin.androidx.compose.koinViewModel
 fun HomeScreen(
     onOpenGameList: () -> Unit,
     onOpenImport: () -> Unit,
+    onOpenDashboard: () -> Unit = {},
     vm: HomeViewModel = koinViewModel(),
 ) {
     val gameCount by vm.gameCount.collectAsState()
@@ -81,6 +83,16 @@ fun HomeScreen(
                 subtitle = "PGN file, Chess.com or Lichess",
                 icon = Icons.Outlined.FileOpen,
                 onClick = onOpenImport,
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── Dashboard card ─────────────────────────────────────────────
+            HomeCard(
+                title = "Cognitive Dashboard",
+                subtitle = "Your behavioural failure patterns",
+                icon = Icons.Outlined.Insights,
+                onClick = onOpenDashboard,
             )
         }
     }

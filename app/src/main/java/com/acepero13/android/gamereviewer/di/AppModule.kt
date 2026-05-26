@@ -5,7 +5,9 @@ import com.acepero13.android.gamereviewer.data.db.AppDatabase
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.ui.screens.AnalysisViewModel
+import com.acepero13.android.gamereviewer.ui.screens.DashboardViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
+import com.acepero13.android.gamereviewer.ui.screens.GameReportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.HomeViewModel
 import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
 import com.acepero13.chess.core.engine.StockfishEngine
@@ -33,6 +35,8 @@ val appModule = module {
     single { get<AppDatabase>().reviewGameDao() }
     single { get<AppDatabase>().annotationDao() }
     single { get<AppDatabase>().criticalMomentDao() }
+    single { get<AppDatabase>().gameEvaluationDao() }
+    single { get<AppDatabase>().moveTimeDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -48,16 +52,26 @@ val appModule = module {
     // ── ViewModels ────────────────────────────────────────────────────────────
     viewModel { HomeViewModel(get()) }
     viewModel { GameListViewModel(get()) }
-    viewModel { ImportViewModel(get(), get(), get(), get()) }
+    viewModel { ImportViewModel(get(), get(), get(), get(), get()) }
     viewModel { (gameId: Long) ->
         AnalysisViewModel(
-            gameId         = gameId,
-            repo           = get(),
-            annotationDao  = get(),
+            gameId            = gameId,
+            repo              = get(),
+            annotationDao     = get(),
             criticalMomentDao = get(),
-            engine         = get(),
-            opening        = get(),
-            truthMapBuilder = get(),
+            gameEvaluationDao = get(),
+            engine            = get(),
+            opening           = get(),
+            truthMapBuilder   = get(),
         )
     }
+    viewModel { (gameId: Long) ->
+        GameReportViewModel(
+            gameId      = gameId,
+            repo        = get(),
+            evalDao     = get(),
+            moveTimeDao = get(),
+        )
+    }
+    viewModel { DashboardViewModel(get(), get()) }
 }

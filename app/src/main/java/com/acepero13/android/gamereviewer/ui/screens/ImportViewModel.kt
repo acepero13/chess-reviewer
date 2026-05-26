@@ -4,8 +4,11 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
+import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.ClockParser
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
 import com.acepero13.chess.core.pgn.ChessComFetcher
@@ -34,6 +37,7 @@ class ImportViewModel(
     private val importer: PgnImporter,
     private val opening: OpeningClassifier,
     @Suppress("UNUSED_PARAMETER") engine: StockfishEngine,   // reserved for future analysis
+    private val moveTimeDao: MoveTimeDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ImportUiState())
@@ -126,7 +130,30 @@ class ImportViewModel(
                 sourceType   = sourceType,
                 sourceId     = siteId,
             )
-            repo.insert(game)
+            val gameDbId = repo.insert(game)
+
+            // ── Parse clock annotations (Task 4.1) ────────────────────────────
+            // Runs on the same IO coroutine — small overhead compared to the network fetch.
+            if (gameDbId > 0) {
+                val timeControl = parsed.headers["TimeControl"]
+                val clocks      = ClockParser.parseMoveClocks(gamePgn)
+                if (clocks.isNotEmpty()) {
+                    val timeSpent = ClockParser.computeTimeSpent(
+                        clocks         = clocks,
+                        initialSeconds = ClockParser.parseTimeControl(timeControl) ?: 0,
+                    )
+                    val moveTimes = clocks.indices.map { i ->
+                        MoveTimeData(
+                            gameId                 = gameDbId,
+                            moveIndex              = i + 1,     // 1-based
+                            timeSpentSeconds       = timeSpent.getOrElse(i) { 0 },
+                            clockRemainingSeconds  = clocks[i],
+                        )
+                    }
+                    moveTimeDao.insertAll(moveTimes)
+                }
+            }
+
             imported++
             _uiState.update { it.copy(importedCount = imported, skippedCount = skipped) }
         }
