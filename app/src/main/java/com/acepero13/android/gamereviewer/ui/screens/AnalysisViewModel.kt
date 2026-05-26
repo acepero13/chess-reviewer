@@ -7,11 +7,13 @@ import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.InsightReconciler
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.domain.TruthMapEntry
-import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
+import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.data.model.PositionAnnotation
+import com.acepero13.chess.core.engine.EngineResult
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
 import com.acepero13.chess.core.ui.board.Arrow
@@ -33,44 +35,68 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 data class AnalysisUiState(
     val game: ReviewGame? = null,
-    val moveIndex: Int = 0,             // 0 = before first move (starting position)
+    val moveIndex: Int = 0,              // 0 = before first move (starting position)
     val totalMoves: Int = 0,
     val boardState: BoardState = BoardState(fen = START_FEN),
 
     // Move tree
     val treeItems: List<TreeDisplayItem> = emptyList(),
 
-    // Opening summary (non-judgmental header)
+    // Non-judgmental opening / game summary (no accuracy scores)
     val openingSummary: String = "",
     val phaseSummary: String = "",
 
-    // Background analysis (hidden from user)
-    val backgroundAnalysisProgress: Float = 0f,     // 0..1
+    // Background analysis (entirely hidden from the user)
+    val backgroundAnalysisProgress: Float = 0f,   // 0..1
     val isBackgroundAnalysisDone: Boolean = false,
 
     // Annotation for the current position
     val currentComment: String = "",
     val hasAnnotationAtCurrent: Boolean = false,
 
-    // Missed Moment intervention
+    // ── Missed Moment (Task 3.2) ─────────────────────────────────────────────
     val showMissedMomentBanner: Boolean = false,
     val missedMomentMoveIndex: Int? = null,
 
-    // Critical moment bottom-sheet questionnaire
+    // ── Guided Discovery (Task 3.3) ──────────────────────────────────────────
+    /** True while the guided discovery panel is open; navigation is frozen. */
+    val guidedDiscoveryMode: Boolean = false,
+    val guidedDiscoveryInsight: InsightReconciler.Insight? = null,
+    val guidedDiscoveryCriticalMoment: CriticalMoment? = null,
+    /** User's free-text thoughts written inside the guided panel. */
+    val guidedDiscoveryThoughts: String = "",
+    /** True once the user requested the conceptual hint (HINTED state). */
+    val guidedDiscoveryHintVisible: Boolean = false,
+    /** True once the user requested the engine answer (REVEALED state).
+     *  The best-move arrow appears in boardState.arrows. */
+    val guidedDiscoveryAnswerRevealed: Boolean = false,
+    val guidedDiscoveryRevealedEvalCp: Int? = null,
+    val guidedDiscoveryEngineThinking: Boolean = false,
+
+    // ── Critical-moment bottom-sheet (Milestone 2 questionnaire) ────────────
     val showCriticalSheet: Boolean = false,
 
-    // Sandbox mode (Milestone 2)
+    // ── Sandbox mode (Milestone 2) ───────────────────────────────────────────
     val sandboxMode: Boolean = false,
     val sandboxEngineThinking: Boolean = false,
-    val blunderGuardActive: Boolean = false,        // board flash
-    val blunderGuardMessage: String = "",
 
-    // Critical moments for this game
+    // ── Blunder Guard (Task 3.1) ─────────────────────────────────────────────
+    /** True when the board border should flash (bad move detected in sandbox). */
+    val blunderGuardActive: Boolean = false,
+    /** True when the reflection panel is shown and further sandbox play is blocked. */
+    val blunderReflectionMode: Boolean = false,
+    val blunderReflectionInsight: InsightReconciler.Insight? = null,
+    /** FEN to restore when the user presses "Try Again" after a blunder. */
+    val blunderPreMoveFen: String = "",
+    val blunderCpLoss: Int = 0,
+
+    // ── Critical moments for this game ──────────────────────────────────────
     val criticalMoments: List<CriticalMoment> = emptyList(),
 )
 
@@ -100,29 +126,31 @@ class AnalysisViewModel(
     /** Pre-computed FEN after each move. Index 0 = START_FEN, index n = FEN after move n. */
     private var fenSequence: List<String> = emptyList()
 
-    /** The hidden Truth Map — never exposed in UiState. */
+    /** The hidden Truth Map — never exposed in UiState directly. */
     private var truthMap: List<TruthMapEntry> = emptyList()
+
+    /** Running eval of the current sandbox position (White-perspective cp).
+     *  Updated from the truth map or from on-demand engine analysis. */
+    private var sandboxEvalCp: Int? = null
 
     /** Annotation cache keyed by FEN to reduce DB round-trips. */
     private val annotationCache = mutableMapOf<String, PositionAnnotation?>()
 
     private val gson = Gson()
 
-    init {
-        loadGame()
-    }
+    init { loadGame() }
 
-    // ── Public navigation API ─────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Navigation
+    // ═══════════════════════════════════════════════════════════════════════════
 
+    /** Navigate to position [index]. Ignored when guided discovery is active. */
     fun goToMove(index: Int) {
+        if (_uiState.value.guidedDiscoveryMode) return   // navigation frozen
         val clamped = index.coerceIn(0, uciMoves.size)
-        val prev = _uiState.value.moveIndex
+        val prev    = _uiState.value.moveIndex
 
-        // Detect missed moments: user skipped forward past a critical position
-        if (clamped > prev) {
-            checkMissedMoments(fromIndex = prev, toIndex = clamped)
-        }
-
+        if (clamped > prev) checkMissedMoments(fromIndex = prev, toIndex = clamped)
         applyMoveIndex(clamped)
     }
 
@@ -131,47 +159,49 @@ class AnalysisViewModel(
     fun goToStart()    = goToMove(0)
     fun goToEnd()      = goToMove(uciMoves.size)
 
-    /** Called when the user taps a move in the MoveTree. */
+    /** Called when the user taps a move chip in the MoveTree. */
     fun onMoveNodeClick(nodeId: Long) = goToMove(nodeId.toInt())
 
-    // ── Annotation API ────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Annotation
+    // ═══════════════════════════════════════════════════════════════════════════
 
     fun onArrowDrawn(from: Square, to: Square) {
-        val current = _uiState.value.boardState
+        val cur   = _uiState.value.boardState
         val arrow = Arrow(from, to, Color(0xCCF0A500.toInt()))
-        val updated = if (current.userArrows.any { it.from == from && it.to == to }) {
-            current.copy(userArrows = current.userArrows.filter { !(it.from == from && it.to == to) })
-        } else {
-            current.copy(userArrows = current.userArrows + arrow)
-        }
-        _uiState.update { it.copy(boardState = updated) }
-        persistAnnotation(updated)
+        val upd   = if (cur.userArrows.any { it.from == from && it.to == to })
+            cur.copy(userArrows = cur.userArrows.filter { !(it.from == from && it.to == to) })
+        else
+            cur.copy(userArrows = cur.userArrows + arrow)
+        _uiState.update { it.copy(boardState = upd) }
+        persistAnnotation(upd)
     }
 
     fun onSquareMarked(square: Square) {
-        val current = _uiState.value.boardState
-        val updated = if (current.markedSquares.any { it.square == square }) {
-            current.copy(markedSquares = current.markedSquares.filter { it.square != square })
-        } else {
-            current.copy(markedSquares = current.markedSquares + MarkedSquare(square, Color(0x88F0A500.toInt())))
-        }
-        _uiState.update { it.copy(boardState = updated) }
-        persistAnnotation(updated)
+        val cur = _uiState.value.boardState
+        val upd = if (cur.markedSquares.any { it.square == square })
+            cur.copy(markedSquares = cur.markedSquares.filter { it.square != square })
+        else
+            cur.copy(markedSquares = cur.markedSquares + MarkedSquare(square, Color(0x88F0A500.toInt())))
+        _uiState.update { it.copy(boardState = upd) }
+        persistAnnotation(upd)
     }
 
     fun updateMoveComment(comment: String) {
         _uiState.update { it.copy(currentComment = comment) }
         viewModelScope.launch(Dispatchers.IO) {
             val fen = _uiState.value.boardState.fen
-            val existing = getCachedAnnotation(fen)
-            val updated = (existing ?: PositionAnnotation(fen = fen)).copy(moveComment = comment)
-            annotationDao.upsert(updated)
-            annotationCache[fen] = updated
-            refreshTreeItems()          // dot-indicator may change
+            val upd = (getCachedAnnotation(fen) ?: PositionAnnotation(fen = fen))
+                .copy(moveComment = comment)
+            annotationDao.upsert(upd)
+            annotationCache[fen] = upd
+            refreshTreeItems()
         }
     }
 
-    // ── Critical moment / questionnaire API ──────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Critical-moment questionnaire (Milestone 2)
+    // ═══════════════════════════════════════════════════════════════════════════
 
     fun markCurrentAsCritical() {
         _uiState.update { it.copy(showCriticalSheet = true) }
@@ -181,11 +211,6 @@ class AnalysisViewModel(
         _uiState.update { it.copy(showCriticalSheet = false) }
     }
 
-    /**
-     * Called when the user submits the BottomSheet questionnaire.
-     * Serialises the answers into the position annotation and saves a USER_MARKED
-     * critical moment.
-     */
     fun saveCriticalAnswers(plan: String, threats: String, candidates: String) {
         val idx = _uiState.value.moveIndex
         val fen = _uiState.value.boardState.fen
@@ -197,28 +222,26 @@ class AnalysisViewModel(
         }.trim()
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Persist annotation
-            val existing = getCachedAnnotation(fen)
-            val updated = (existing ?: PositionAnnotation(fen = fen)).copy(moveComment = comment)
-            annotationDao.upsert(updated)
-            annotationCache[fen] = updated
+            val upd = (getCachedAnnotation(fen) ?: PositionAnnotation(fen = fen))
+                .copy(moveComment = comment)
+            annotationDao.upsert(upd)
+            annotationCache[fen] = upd
 
-            // Save user-marked critical moment
-            val moment = CriticalMoment(
-                gameId         = gameId,
-                moveIndex      = idx,
-                type           = CriticalMoment.Type.USER_MARKED.name,
-                severity       = 0,  // user doesn't know the eval yet
-                reasonCategory = CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name,
-                explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
-                fen            = fen,
+            criticalMomentDao.insert(
+                CriticalMoment(
+                    gameId           = gameId,
+                    moveIndex        = idx,
+                    type             = CriticalMoment.Type.USER_MARKED.name,
+                    severity         = 0,
+                    reasonCategory   = CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name,
+                    explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
+                    fen              = fen,
+                )
             )
-            criticalMomentDao.insert(moment)
-
             _uiState.update {
                 it.copy(
-                    showCriticalSheet  = false,
-                    currentComment     = comment,
+                    showCriticalSheet      = false,
+                    currentComment         = comment,
                     hasAnnotationAtCurrent = true,
                 )
             }
@@ -226,160 +249,336 @@ class AnalysisViewModel(
         }
     }
 
-    // ── Missed Moment banner ──────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Missed Moment banner (Task 3.2)
+    // ═══════════════════════════════════════════════════════════════════════════
 
     fun dismissMissedMomentBanner() {
         _uiState.update { it.copy(showMissedMomentBanner = false, missedMomentMoveIndex = null) }
     }
 
     /**
-     * Jump back to the missed critical position so the user can annotate it.
+     * Navigates to the missed critical position and activates the Guided Discovery panel
+     * (Task 3.3) so the user cannot simply scroll past it again.
      */
     fun reviewMissedMoment() {
         val idx = _uiState.value.missedMomentMoveIndex ?: return
         dismissMissedMomentBanner()
-        goToMove(idx)
+        enterGuidedDiscovery(idx)
     }
 
-    // ── Sandbox mode (Milestone 2) ────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Guided Discovery (Task 3.3)
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    fun enterSandboxMode() {
+    /**
+     * Navigates to [moveIndex], freezes navigation, and opens the Guided Discovery panel.
+     * Chooses questions based on the [CriticalMoment.ReasonCategory] for this move.
+     */
+    fun enterGuidedDiscovery(moveIndex: Int) {
+        val moment = _uiState.value.criticalMoments
+            .firstOrNull { it.moveIndex == moveIndex && it.type == CriticalMoment.Type.ENGINE_MARKED.name }
+        val reason  = moment?.toReason() ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE
+        val insight = InsightReconciler.forReason(reason)
+
+        // Navigate silently (bypass the goToMove guard)
+        val clamped = moveIndex.coerceIn(0, uciMoves.size)
+        applyMoveIndex(clamped)
+
         _uiState.update {
             it.copy(
-                sandboxMode = true,
-                boardState  = it.boardState.copy(isEditorMode = true),
+                guidedDiscoveryMode              = true,
+                guidedDiscoveryInsight           = insight,
+                guidedDiscoveryCriticalMoment    = moment,
+                guidedDiscoveryThoughts          = "",
+                guidedDiscoveryHintVisible       = false,
+                guidedDiscoveryAnswerRevealed    = false,
+                guidedDiscoveryRevealedEvalCp    = null,
+                guidedDiscoveryEngineThinking    = false,
+                boardState                       = it.boardState.copy(
+                    isEditorMode = false,  // read-only during guided discovery
+                    arrows       = emptyList(),
+                ),
+                showMissedMomentBanner           = false,
+            )
+        }
+    }
+
+    /** Exits guided discovery and restores normal navigation. */
+    fun exitGuidedDiscovery() {
+        val idx = _uiState.value.moveIndex
+        _uiState.update {
+            it.copy(
+                guidedDiscoveryMode           = false,
+                guidedDiscoveryInsight        = null,
+                guidedDiscoveryCriticalMoment = null,
+                guidedDiscoveryAnswerRevealed = false,
+                guidedDiscoveryHintVisible    = false,
+                guidedDiscoveryRevealedEvalCp = null,
+            )
+        }
+        applyMoveIndex(idx)   // re-apply with editor mode re-enabled
+    }
+
+    fun updateGuidedThoughts(text: String) {
+        _uiState.update { it.copy(guidedDiscoveryThoughts = text) }
+    }
+
+    /**
+     * Shows the conceptual hint (no engine move revealed).
+     * Updates the [CriticalMoment] in the DB to [CriticalMoment.ExplanationState.HINTED].
+     */
+    fun revealGuidedHint() {
+        _uiState.update { it.copy(guidedDiscoveryHintVisible = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val moment = _uiState.value.guidedDiscoveryCriticalMoment ?: return@launch
+            criticalMomentDao.update(
+                moment.copy(explanationState = CriticalMoment.ExplanationState.HINTED.name)
+            )
+        }
+    }
+
+    /**
+     * Runs engine analysis on the current position and shows the best-move arrow on the board.
+     * Updates the [CriticalMoment] to [CriticalMoment.ExplanationState.REVEALED].
+     * Saves the user's thoughts as a position annotation.
+     */
+    fun revealGuidedAnswer() {
+        val fen      = _uiState.value.boardState.fen
+        val thoughts = _uiState.value.guidedDiscoveryThoughts
+        _uiState.update { it.copy(guidedDiscoveryEngineThinking = true) }
+
+        viewModelScope.launch(Dispatchers.Default) {
+            val result = runCatching {
+                engine.analyzePosition(fen, depth = ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+            }.getOrNull()
+
+            val engineArrow = result?.toArrow()
+            val evalCp      = result?.let { r ->
+                val b = Board()
+                b.loadFromFen(fen)
+                r.toWhitePerspective(b)
+            }
+
+            // Persist the user's thoughts + mark as REVEALED in DB
+            if (thoughts.isNotBlank()) {
+                val header = "### Guided Discovery Notes\n"
+                launch(Dispatchers.IO) {
+                    val existing = getCachedAnnotation(fen)
+                    val newComment = buildString {
+                        val prev = existing?.moveComment?.takeIf { it.isNotBlank() }
+                        if (prev != null) { appendLine(prev); appendLine() }
+                        append(header)
+                        appendLine(thoughts)
+                    }.trim()
+                    val upd = (existing ?: PositionAnnotation(fen = fen))
+                        .copy(moveComment = newComment)
+                    annotationDao.upsert(upd)
+                    annotationCache[fen] = upd
+                    _uiState.update { it.copy(currentComment = newComment) }
+                    refreshTreeItems()
+                }
+            }
+
+            val moment = _uiState.value.guidedDiscoveryCriticalMoment
+            if (moment != null) {
+                launch(Dispatchers.IO) {
+                    criticalMomentDao.update(
+                        moment.copy(explanationState = CriticalMoment.ExplanationState.REVEALED.name)
+                    )
+                }
+            }
+
+            _uiState.update { state ->
+                state.copy(
+                    guidedDiscoveryEngineThinking = false,
+                    guidedDiscoveryAnswerRevealed = true,
+                    guidedDiscoveryRevealedEvalCp = evalCp,
+                    boardState = state.boardState.copy(
+                        arrows = if (engineArrow != null) listOf(engineArrow) else emptyList(),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * Saves the user's thoughts and exits guided discovery mode.
+     * The position is now marked as reviewed.
+     */
+    fun submitGuidedThoughts() {
+        val thoughts = _uiState.value.guidedDiscoveryThoughts
+        val fen      = _uiState.value.boardState.fen
+
+        if (thoughts.isNotBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val header  = "### Guided Discovery Notes\n"
+                val existing = getCachedAnnotation(fen)
+                val prev    = existing?.moveComment?.takeIf { it.isNotBlank() }
+                val newComment = buildString {
+                    if (prev != null) { appendLine(prev); appendLine() }
+                    append(header)
+                    appendLine(thoughts)
+                }.trim()
+                val upd = (existing ?: PositionAnnotation(fen = fen))
+                    .copy(moveComment = newComment)
+                annotationDao.upsert(upd)
+                annotationCache[fen] = upd
+                _uiState.update { it.copy(currentComment = newComment) }
+                refreshTreeItems()
+            }
+        }
+        exitGuidedDiscovery()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Sandbox (Milestone 2 + enhanced Task 3.1)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun enterSandboxMode() {
+        val fen = _uiState.value.boardState.fen
+        sandboxEvalCp = truthMap.find { it.fen == fen }?.evalCp
+        _uiState.update {
+            it.copy(
+                sandboxMode    = true,
+                blunderReflectionMode = false,
+                boardState     = it.boardState.copy(isEditorMode = true),
             )
         }
     }
 
     fun exitSandboxMode() {
-        _uiState.update { it.copy(sandboxMode = false, blunderGuardActive = false) }
-        applyMoveIndex(_uiState.value.moveIndex) // re-apply main line position
+        _uiState.update {
+            it.copy(
+                sandboxMode           = false,
+                blunderGuardActive    = false,
+                blunderReflectionMode = false,
+                sandboxEngineThinking = false,
+            )
+        }
+        applyMoveIndex(_uiState.value.moveIndex)
     }
 
-    fun dismissBlunderGuard() {
-        _uiState.update { it.copy(blunderGuardActive = false, blunderGuardMessage = "") }
-    }
-
-    /**
-     * User tapped a square in sandbox mode — handle piece selection + move execution.
-     */
     fun onSandboxSquareTap(square: Square) {
         if (_uiState.value.sandboxEngineThinking) return
-        val current = _uiState.value.boardState
-        val selected = current.selectedSquare
+        if (_uiState.value.blunderReflectionMode)  return  // locked until user acknowledges
+        val cur      = _uiState.value.boardState
+        val selected = cur.selectedSquare
 
         if (selected == null) {
-            // Select piece if there's one belonging to the side to move
-            val fen = current.fen
-            val board = Board()
-            board.loadFromFen(fen)
+            val board = Board().apply { loadFromFen(cur.fen) }
             val piece = board.getPiece(square)
             if (piece != Piece.NONE && piece.pieceSide == board.sideToMove) {
-                val legalMoves = board.legalMoves().filter { it.from == square }
-                _uiState.update {
-                    it.copy(
-                        boardState = current.copy(
-                            selectedSquare = square,
-                            legalMoves     = legalMoves,
-                        )
-                    )
-                }
+                val legal = board.legalMoves().filter { it.from == square }
+                _uiState.update { it.copy(boardState = cur.copy(selectedSquare = square, legalMoves = legal)) }
             }
         } else {
-            // Attempt move
-            val board = Board()
-            board.loadFromFen(current.fen)
-            val move = ChessUtils.buildMove(board, selected, square, solutionUci = null)
-            val legalMoves = board.legalMoves()
-
-            if (legalMoves.contains(move)) {
-                executeSandboxMove(board, move)
+            val board = Board().apply { loadFromFen(cur.fen) }
+            val move  = ChessUtils.buildMove(board, selected, square, solutionUci = null)
+            if (board.legalMoves().contains(move)) {
+                attemptSandboxMove(preFen = cur.fen, move = move)
             } else {
-                // Deselect
-                _uiState.update {
-                    it.copy(boardState = current.copy(selectedSquare = null, legalMoves = emptyList()))
-                }
+                _uiState.update { it.copy(boardState = cur.copy(selectedSquare = null, legalMoves = emptyList())) }
             }
         }
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    /** User wants to try a different move after a blunder was detected (restores pre-blunder FEN). */
+    fun retryAfterBlunder() {
+        val preFen = _uiState.value.blunderPreMoveFen
+        if (preFen.isBlank()) { exitSandboxMode(); return }
+        _uiState.update {
+            it.copy(
+                blunderGuardActive    = false,
+                blunderReflectionMode = false,
+                blunderReflectionInsight = null,
+                boardState = it.boardState.copy(
+                    fen          = preFen,
+                    lastMove     = null,
+                    selectedSquare = null,
+                    legalMoves   = emptyList(),
+                    showingFlash = false,
+                ),
+            )
+        }
+    }
+
+    /** User acknowledges the blunder but keeps the position (continues from blunder state). */
+    fun continueAfterBlunder() {
+        _uiState.update {
+            it.copy(
+                blunderGuardActive    = false,
+                blunderReflectionMode = false,
+                blunderReflectionInsight = null,
+                boardState = it.boardState.copy(showingFlash = false),
+            )
+        }
+        // Trigger engine reply from the current (blunder) position
+        triggerEngineReply(_uiState.value.boardState.fen)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PRIVATE — Core
+    // ═══════════════════════════════════════════════════════════════════════════
 
     private fun loadGame() {
         viewModelScope.launch(Dispatchers.IO) {
             val game = repo.findById(gameId) ?: return@launch
             uciMoves = game.movesUci.split(' ').filter { it.isNotBlank() }
-
-            // Pre-compute FEN sequence + SAN list
             buildFenAndSanSequence()
 
-            // Load existing critical moments from DB
             val storedMoments = criticalMomentDao.getByGameId(gameId)
-
-            // Opening summary (non-judgmental header — no accuracy scores)
-            val openingEntry = runCatching {
-                opening.classifyByMoves(uciMoves.take(20))
-            }.getOrNull()
+            val openingEntry  = runCatching { opening.classifyByMoves(uciMoves.take(20)) }.getOrNull()
 
             _uiState.update {
                 it.copy(
                     game            = game,
                     totalMoves      = uciMoves.size,
-                    openingSummary  = if (openingEntry != null) "${openingEntry.eco} · ${openingEntry.name}" else "",
-                    phaseSummary    = buildPhaseSummary(game),
+                    openingSummary  = openingEntry?.let { e -> "${e.eco} · ${e.name}" } ?: "",
+                    phaseSummary    = buildPhaseSummary(),
                     criticalMoments = storedMoments,
                 )
             }
-
             applyMoveIndex(0)
-
-            // Launch hidden background Truth Map analysis
             launchBackgroundAnalysis(storedMoments)
         }
     }
 
-    /**
-     * Builds the FEN sequence (index 0 = start, index n = after move n) and the
-     * parallel SAN list. Both are pre-computed once so navigation is O(1).
-     */
     private fun buildFenAndSanSequence() {
-        val fens = mutableListOf<String>(START_FEN)
-        val sans = mutableListOf<String>()
-        val board = Board()
-        board.loadFromFen(START_FEN)
-
+        val fens  = mutableListOf(START_FEN)
+        val sans  = mutableListOf<String>()
+        val board = Board().apply { loadFromFen(START_FEN) }
         for (uci in uciMoves) {
-            val san = runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci)
+            sans.add(runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci))
             val move = uciToMove(board, uci) ?: break
             board.doMove(move)
-            sans.add(san)
             fens.add(board.fen)
         }
         fenSequence = fens
         sanMoves    = sans
     }
 
-    /** Applies the position at [index] to the board and loads its annotation. */
     private fun applyMoveIndex(index: Int) {
-        val fen        = fenSequence.getOrElse(index) { START_FEN }
-        val lastMove   = if (index > 0) uciToMoveFromFens(index) else null
-        val annotation = getCachedAnnotation(fen)
-        val arrows     = annotation?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
-        val marks      = annotation?.markedSquaresJson?.let { parseMarks(it) } ?: emptyList()
-        val comment    = annotation?.moveComment ?: ""
+        val fen      = fenSequence.getOrElse(index) { START_FEN }
+        val lastMove = if (index > 0) uciToMoveFromFens(index) else null
+        val annot    = getCachedAnnotation(fen)
+        val arrows   = annot?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
+        val marks    = annot?.markedSquaresJson?.let { parseMarks(it) } ?: emptyList()
+        val comment  = annot?.moveComment ?: ""
 
-        _uiState.update { state ->
-            state.copy(
-                moveIndex = index,
-                boardState = state.boardState.copy(
+        _uiState.update { s ->
+            s.copy(
+                moveIndex  = index,
+                boardState = s.boardState.copy(
                     fen            = fen,
                     lastMove       = lastMove,
                     selectedSquare = null,
                     legalMoves     = emptyList(),
                     userArrows     = arrows,
                     markedSquares  = marks,
-                    isEditorMode   = true,
+                    arrows         = emptyList(),   // clear engine arrows on navigation
+                    isEditorMode   = !s.guidedDiscoveryMode,
+                    showingFlash   = false,
                 ),
                 currentComment         = comment,
                 hasAnnotationAtCurrent = comment.isNotBlank() || arrows.isNotEmpty() || marks.isNotEmpty(),
@@ -389,80 +588,73 @@ class AnalysisViewModel(
         }
     }
 
-    /** Rebuilds the tree display list whenever the current index or annotations change. */
     private fun buildTreeItems(currentIndex: Int): List<TreeDisplayItem> {
-        val items = mutableListOf<TreeDisplayItem>()
-        var moveNumber = 1
+        val items  = mutableListOf<TreeDisplayItem>()
+        var moveNo = 1
         sanMoves.forEachIndexed { idx, san ->
-            val moveIdx  = idx + 1          // move index is 1-based
-            val isWhite  = idx % 2 == 0
-            val fen      = fenSequence.getOrElse(moveIdx) { START_FEN }
-            val annot    = getCachedAnnotation(fen)
-            val comment  = annot?.moveComment ?: ""
+            val mIdx    = idx + 1
+            val isWhite = idx % 2 == 0
+            val fen     = fenSequence.getOrElse(mIdx) { START_FEN }
+            val annot   = getCachedAnnotation(fen)
+            val comment = annot?.moveComment ?: ""
             val hasAnnot = comment.isNotBlank() ||
-                    (annot?.arrowsJson?.length ?: 0) > 2 ||
-                    (annot?.markedSquaresJson?.length ?: 0) > 2
+                (annot?.arrowsJson?.length ?: 0) > 2 ||
+                (annot?.markedSquaresJson?.length ?: 0) > 2
 
             items.add(
                 TreeDisplayItem.MoveItem(
-                    nodeId          = moveIdx.toLong(),
-                    san             = san,
-                    fen             = fen,
-                    comment         = comment,
-                    hasAnnotations  = hasAnnot,
-                    isCurrentMove   = moveIdx == currentIndex,
-                    depth           = 0,
-                    moveNumber      = moveNumber,
-                    isWhiteMove     = isWhite,
-                    showMoveNumber  = isWhite,
+                    nodeId         = mIdx.toLong(),
+                    san            = san,
+                    fen            = fen,
+                    comment        = comment,
+                    hasAnnotations = hasAnnot,
+                    isCurrentMove  = mIdx == currentIndex,
+                    depth          = 0,
+                    moveNumber     = moveNo,
+                    isWhiteMove    = isWhite,
+                    showMoveNumber = isWhite,
                 )
             )
-            if (!isWhite) moveNumber++
+            if (!isWhite) moveNo++
         }
         return items
     }
 
-    /** Rebuilds tree items and updates state (used after annotation saves). */
     private fun refreshTreeItems() {
-        val idx = _uiState.value.moveIndex
-        _uiState.update { it.copy(treeItems = buildTreeItems(idx)) }
+        _uiState.update { it.copy(treeItems = buildTreeItems(it.moveIndex)) }
     }
 
-    // ── Background Truth Map analysis ─────────────────────────────────────────
+    // ─── Background Truth Map ─────────────────────────────────────────────────
 
-    private fun launchBackgroundAnalysis(storedMoments: List<CriticalMoment>) {
-        // Skip if already analyzed for this game
-        if (storedMoments.any { it.type == CriticalMoment.Type.ENGINE_MARKED.name }) return
+    private fun launchBackgroundAnalysis(stored: List<CriticalMoment>) {
+        if (stored.any { it.type == CriticalMoment.Type.ENGINE_MARKED.name }) {
+            truthMap = emptyList()  // can't restore in-memory from DB alone; just skip
+            _uiState.update { it.copy(isBackgroundAnalysisDone = true, backgroundAnalysisProgress = 1f) }
+            return
+        }
 
         viewModelScope.launch(Dispatchers.Default) {
             val map = truthMapBuilder.build(uciMoves) { processed, total ->
-                _uiState.update {
-                    it.copy(backgroundAnalysisProgress = processed.toFloat() / total)
-                }
+                _uiState.update { it.copy(backgroundAnalysisProgress = processed.toFloat() / total) }
             }
             truthMap = map
 
-            // Persist engine-marked critical moments to DB
-            val moments = map
-                .filter { it.isCritical || it.hasTacticalMotif }
-                .map { entry ->
-                    CriticalMoment(
-                        gameId           = gameId,
-                        moveIndex        = entry.moveIndex,
-                        type             = CriticalMoment.Type.ENGINE_MARKED.name,
-                        severity         = Math.abs(entry.playerEvalDelta),
-                        reasonCategory   = motifToReasonCategory(entry.motif),
-                        explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
-                        fen              = entry.fen,
-                    )
-                }
-            if (moments.isNotEmpty()) {
-                criticalMomentDao.insertAll(moments)
+            val moments = map.filter { it.isCritical || it.hasTacticalMotif }.map { entry ->
+                CriticalMoment(
+                    gameId           = gameId,
+                    moveIndex        = entry.moveIndex,
+                    type             = CriticalMoment.Type.ENGINE_MARKED.name,
+                    severity         = kotlin.math.abs(entry.playerEvalDelta),
+                    reasonCategory   = motifToReason(entry.motif),
+                    explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
+                    fen              = entry.fen,
+                )
             }
+            if (moments.isNotEmpty()) criticalMomentDao.insertAll(moments)
 
             _uiState.update {
                 it.copy(
-                    isBackgroundAnalysisDone  = true,
+                    isBackgroundAnalysisDone   = true,
                     backgroundAnalysisProgress = 1f,
                     criticalMoments            = criticalMomentDao.getByGameId(gameId),
                 )
@@ -470,72 +662,111 @@ class AnalysisViewModel(
         }
     }
 
-    // ── Missed Moment detection ───────────────────────────────────────────────
+    // ─── Missed Moment detection ──────────────────────────────────────────────
 
     private fun checkMissedMoments(fromIndex: Int, toIndex: Int) {
-        if (truthMap.isEmpty()) return // analysis not done yet
+        if (truthMap.isEmpty() && _uiState.value.criticalMoments.isEmpty()) return
 
-        for (idx in fromIndex until toIndex) {
-            val entry = truthMap.getOrNull(idx - 1) ?: continue   // idx is 1-based in truthMap
-            if (!entry.isCritical && !entry.hasTacticalMotif) continue
+        val criticalIndices = if (truthMap.isNotEmpty()) {
+            truthMap.filter { it.isCritical || it.hasTacticalMotif }.map { it.moveIndex }.toSet()
+        } else {
+            _uiState.value.criticalMoments
+                .filter { it.type == CriticalMoment.Type.ENGINE_MARKED.name }
+                .map { it.moveIndex }.toSet()
+        }
 
-            val fen    = fenSequence.getOrElse(idx) { continue }
-            val annot  = getCachedAnnotation(fen)
-            val isAnnotated = (annot?.moveComment?.isNotBlank() == true) ||
-                    (annot?.arrowsJson?.length ?: 0) > 2
-
-            if (!isAnnotated) {
+        for (idx in (fromIndex + 1)..toIndex) {
+            if (idx !in criticalIndices) continue
+            val fen     = fenSequence.getOrElse(idx) { continue }
+            val annot   = getCachedAnnotation(fen)
+            val reviewed = (annot?.moveComment?.isNotBlank() == true) ||
+                (annot?.arrowsJson?.length ?: 0) > 2
+            if (!reviewed) {
                 _uiState.update {
-                    it.copy(
-                        showMissedMomentBanner = true,
-                        missedMomentMoveIndex  = idx,
-                    )
+                    it.copy(showMissedMomentBanner = true, missedMomentMoveIndex = idx)
                 }
-                return // show one at a time
+                return
             }
         }
     }
 
-    // ── Sandbox: execute a player move + engine response ──────────────────────
+    // ─── Sandbox: attempt move + async blunder check ──────────────────────────
 
-    private fun executeSandboxMove(board: Board, move: Move) {
-        board.doMove(move)
-        val newFen   = board.fen
-        val lastMove = move
+    /**
+     * Applies the move immediately for visual feedback, then runs a quick engine analysis
+     * (depth 10) to detect blunders. If the move is a blunder:
+     * - The board is left showing the move (so the user sees what they played)
+     * - The border flashes red
+     * - The blunder reflection panel opens, blocking further play
+     * If it is not a blunder, the engine plays a reply after [ChessConstants.OPPONENT_REPLY_DELAY_MS].
+     */
+    private fun attemptSandboxMove(preFen: String, move: Move) {
+        val preBoardForSan = Board().apply { loadFromFen(preFen) }
+        val postBoard      = Board().apply { loadFromFen(preFen) }
+        postBoard.doMove(move)
+        val postFen      = postBoard.fen
+        val playerWasWhite = postBoard.sideToMove == Side.BLACK  // after White's move it's Black's turn
 
-        val entryBefore = truthMap.find { it.fen == _uiState.value.boardState.fen }
-        val entryAfter  = truthMap.find { it.fen == newFen }
-
-        // Blunder Guard: if the move loses more than BLUNDER_THRESHOLD_CP from player's perspective
-        val cpLoss = if (entryBefore != null && entryAfter != null) {
-            val playerWasWhite = board.sideToMove == Side.BLACK // board already flipped
-            val evalBefore = if (playerWasWhite) entryBefore.evalCp else -entryBefore.evalCp
-            val evalAfter  = if (playerWasWhite) entryAfter.evalCp  else -entryAfter.evalCp
-            evalBefore - evalAfter  // positive = lost eval
-        } else 0
-
-        val isBlunder = cpLoss >= ChessConstants.BLUNDER_THRESHOLD_CP
-
+        // Optimistically show the move
         _uiState.update {
             it.copy(
                 boardState = it.boardState.copy(
-                    fen        = newFen,
-                    lastMove   = lastMove,
+                    fen            = postFen,
+                    lastMove       = move,
                     selectedSquare = null,
-                    legalMoves = emptyList(),
-                    showingFlash = isBlunder,
+                    legalMoves     = emptyList(),
+                    showingFlash   = false,
                 ),
-                blunderGuardActive  = isBlunder,
-                blunderGuardMessage = if (isBlunder)
-                    "This move loses ≥ ${ChessConstants.BLUNDER_THRESHOLD_CP / 100} pawns. " +
-                    "Take a moment to reconsider your reasoning."
-                else "",
+                sandboxEngineThinking = true,
+                blunderGuardActive    = false,
             )
         }
 
-        if (!isBlunder) {
-            // Engine plays a response after a brief delay
-            triggerEngineReply(newFen)
+        viewModelScope.launch(Dispatchers.Default) {
+            // ── Baseline eval (White-perspective) ────────────────────────────
+            val preEvalWhite = sandboxEvalCp
+                ?: run {
+                    // Position not in truth map → quick analysis of pre-move position
+                    runCatching {
+                        engine.analyzePosition(preFen, depth = 10)
+                    }.getOrNull()?.toWhitePerspective(Board().apply { loadFromFen(preFen) })
+                }
+
+            // ── Post-move eval ───────────────────────────────────────────────
+            val postResult    = runCatching { engine.analyzePosition(postFen, depth = 10) }.getOrNull()
+            val postEvalWhite = postResult?.toWhitePerspective(postBoard)
+
+            // ── Centipawn loss from the player's perspective ─────────────────
+            val cpLoss: Int = if (preEvalWhite != null && postEvalWhite != null) {
+                val loss = if (playerWasWhite) preEvalWhite - postEvalWhite
+                           else               postEvalWhite - preEvalWhite
+                maxOf(0, loss)
+            } else 0
+
+            val isBlunder = cpLoss >= ChessConstants.BLUNDER_THRESHOLD_CP
+            val motif     = postResult?.let { com.acepero13.chess.core.engine.MotifClassifier.classify(it, postFen) } ?: "mixed"
+
+            if (isBlunder) {
+                val insight = InsightReconciler.forBlunder(motif, cpLoss)
+                _uiState.update {
+                    it.copy(
+                        sandboxEngineThinking = false,
+                        blunderGuardActive    = true,
+                        blunderReflectionMode = true,
+                        blunderReflectionInsight = insight,
+                        blunderPreMoveFen     = preFen,
+                        blunderCpLoss         = cpLoss,
+                        boardState = it.boardState.copy(showingFlash = true),
+                    )
+                }
+                delay(ChessConstants.BLIND_INTER_MOVE_FLASH_MS)
+                _uiState.update { it.copy(boardState = it.boardState.copy(showingFlash = false)) }
+            } else {
+                // Update sandbox baseline eval for next blunder check
+                sandboxEvalCp = postEvalWhite
+                _uiState.update { it.copy(sandboxEngineThinking = false, blunderGuardActive = false) }
+                triggerEngineReply(postFen)
+            }
         }
     }
 
@@ -543,23 +774,20 @@ class AnalysisViewModel(
         _uiState.update { it.copy(sandboxEngineThinking = true) }
         viewModelScope.launch(Dispatchers.Default) {
             delay(ChessConstants.OPPONENT_REPLY_DELAY_MS)
-            val result = runCatching {
-                engine.analyzePosition(fen, depth = 15)
-            }.getOrNull()
-
+            val result  = runCatching { engine.analyzePosition(fen, depth = 15) }.getOrNull()
             val bestUci = result?.bestMoveUci
             if (bestUci != null) {
-                val board = Board()
-                board.loadFromFen(fen)
-                val move = uciToMove(board, bestUci)
+                val board = Board().apply { loadFromFen(fen) }
+                val move  = uciToMove(board, bestUci)
                 if (move != null) {
                     board.doMove(move)
+                    val replyFen = board.fen
+                    // Update sandbox baseline for next move's blunder check
+                    val replyResult = runCatching { engine.analyzePosition(replyFen, depth = 10) }.getOrNull()
+                    sandboxEvalCp   = replyResult?.toWhitePerspective(board)
                     _uiState.update {
                         it.copy(
-                            boardState = it.boardState.copy(
-                                fen      = board.fen,
-                                lastMove = move,
-                            ),
+                            boardState = it.boardState.copy(fen = replyFen, lastMove = move),
                             sandboxEngineThinking = false,
                         )
                     }
@@ -570,38 +798,34 @@ class AnalysisViewModel(
         }
     }
 
-    // ── Annotation persistence ────────────────────────────────────────────────
+    // ─── Annotation persistence ───────────────────────────────────────────────
 
     private fun persistAnnotation(boardState: BoardState) {
         viewModelScope.launch(Dispatchers.IO) {
-            val fen      = boardState.fen
+            val fen     = boardState.fen
             val existing = getCachedAnnotation(fen)
-            val updated  = (existing ?: PositionAnnotation(fen = fen)).copy(
+            val upd     = (existing ?: PositionAnnotation(fen = fen)).copy(
                 arrowsJson        = gson.toJson(boardState.userArrows),
                 markedSquaresJson = gson.toJson(boardState.markedSquares),
             )
-            annotationDao.upsert(updated)
-            annotationCache[fen] = updated
-            val hasAnnot = updated.moveComment.isNotBlank() ||
-                    updated.arrowsJson.length > 2 ||
-                    updated.markedSquaresJson.length > 2
+            annotationDao.upsert(upd)
+            annotationCache[fen] = upd
+            val hasAnnot = upd.moveComment.isNotBlank() || upd.arrowsJson.length > 2 || upd.markedSquaresJson.length > 2
             _uiState.update { it.copy(hasAnnotationAtCurrent = hasAnnot) }
             refreshTreeItems()
         }
     }
 
     private fun getCachedAnnotation(fen: String): PositionAnnotation? {
-        return if (annotationCache.containsKey(fen)) {
-            annotationCache[fen]
-        } else {
-            // Blocking load within IO context — acceptable since called from IO coroutines
-            val result = kotlinx.coroutines.runBlocking { annotationDao.getByFen(fen) }
+        return if (annotationCache.containsKey(fen)) annotationCache[fen]
+        else {
+            val result = runBlocking { annotationDao.getByFen(fen) }
             annotationCache[fen] = result
             result
         }
     }
 
-    // ── Parsing helpers ───────────────────────────────────────────────────────
+    // ─── Parsing ─────────────────────────────────────────────────────────────
 
     private fun parseArrows(json: String): List<Arrow> = runCatching {
         gson.fromJson<List<Arrow>>(json, object : TypeToken<List<Arrow>>() {}.type)
@@ -628,19 +852,16 @@ class AnalysisViewModel(
         }.getOrNull()
     }
 
-    /** Reconstructs the Move object from the FEN sequence (used for lastMove highlighting). */
     private fun uciToMoveFromFens(index: Int): Move? {
         if (index < 1 || index > uciMoves.size) return null
-        val uci = uciMoves.getOrNull(index - 1) ?: return null
-        // We need a board at the position BEFORE the move
-        val board = Board()
-        board.loadFromFen(fenSequence.getOrElse(index - 1) { START_FEN })
+        val uci   = uciMoves.getOrNull(index - 1) ?: return null
+        val board = Board().apply { loadFromFen(fenSequence.getOrElse(index - 1) { START_FEN }) }
         return uciToMove(board, uci)
     }
 
-    // ── Summary helpers ───────────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private fun buildPhaseSummary(game: ReviewGame): String {
+    private fun buildPhaseSummary(): String {
         val total = uciMoves.size
         return when {
             total <= 10  -> "Short game · ${total / 2} moves each side"
@@ -649,10 +870,27 @@ class AnalysisViewModel(
         }
     }
 
-    private fun motifToReasonCategory(motif: String): String = when (motif) {
+    private fun motifToReason(motif: String) = when (motif) {
         "checkmate" -> CriticalMoment.ReasonCategory.MISSED_WIN.name
         "hanging"   -> CriticalMoment.ReasonCategory.HANGING_PIECE.name
         "fork"      -> CriticalMoment.ReasonCategory.MISSED_TACTIC.name
         else        -> CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
     }
+}
+
+// ─── Extension helpers ────────────────────────────────────────────────────────
+
+private fun EngineResult.toWhitePerspective(board: Board): Int =
+    if (board.sideToMove == Side.WHITE) score else -score
+
+private fun EngineResult.toArrow(): Arrow? {
+    val uci = bestMoveUci
+    if (uci.length < 4) return null
+    return runCatching {
+        Arrow(
+            from  = Square.valueOf(uci.substring(0, 2).uppercase()),
+            to    = Square.valueOf(uci.substring(2, 4).uppercase()),
+            color = Color(0xCC4CAF50.toInt()),   // green engine arrow
+        )
+    }.getOrNull()
 }
