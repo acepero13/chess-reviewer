@@ -10,6 +10,7 @@ import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.InsightReconciler
+import com.acepero13.android.gamereviewer.domain.extractUciMovesFromFullPgn
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.domain.TruthMapEntry
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
@@ -30,6 +31,7 @@ import com.github.bhlangonijr.chesslib.Square
 import com.github.bhlangonijr.chesslib.move.Move
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +39,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+
+private const val TAG = "AnalysisVM"
+
+// ── Mode enums ────────────────────────────────────────────────────────────────
+
+enum class ReviewMode { NAVIGATE, ANALYSE, MENTOR }
+enum class AnalyseSubMode { VIEW, EDIT, EXPLORE }
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -100,6 +108,23 @@ data class AnalysisUiState(
 
     // ── Critical moments for this game ──────────────────────────────────────
     val criticalMoments: List<CriticalMoment> = emptyList(),
+
+    // ── Mode system ──────────────────────────────────────────────────────────
+    val reviewMode: ReviewMode = ReviewMode.NAVIGATE,
+    val analyseSubMode: AnalyseSubMode = AnalyseSubMode.VIEW,
+    /** Stored before entering MENTOR so exitMentorMode can return to the right place. */
+    val previousReviewMode: ReviewMode = ReviewMode.NAVIGATE,
+    /** True when the Mentor button should be enabled (ENGINE_MARKED moment at current index). */
+    val mentorAvailable: Boolean = false,
+
+    // ── Analyse mode engine toggles ──────────────────────────────────────────
+    val evalBarVisible: Boolean = false,
+    val bestMoveVisible: Boolean = false,
+    /** Current centipawn eval (White-perspective) sourced from truth map; feeds EvalBar. */
+    val currentEvalCp: Int? = null,
+
+    // ── Edit sub-mode annotation color (shared by arrows and square marks) ──
+    val currentArrowColor: Color = Color(0xCCF0A500.toInt()),   // ChessGold default
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -147,20 +172,29 @@ class AnalysisViewModel(
     // PUBLIC — Navigation
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /** Navigate to position [index]. Ignored when guided discovery is active. */
+    /** Navigate to position [index]. Ignored when Mentor mode is active (navigation frozen). */
     fun goToMove(index: Int) {
-        if (_uiState.value.guidedDiscoveryMode) return   // navigation frozen
+        Log.d(TAG, "goToMove($index) — reviewMode=${_uiState.value.reviewMode} uciMoves.size=${uciMoves.size} fenSequence.size=${fenSequence.size}")
+        if (_uiState.value.reviewMode == ReviewMode.MENTOR) {
+            Log.d(TAG, "goToMove: BLOCKED (mentor/guided discovery active)")
+            return
+        }
+        // Diagnostic: if uciMoves is still empty, log the raw DB fields so we can see why
+        if (uciMoves.isEmpty()) {
+            val game = _uiState.value.game
+            Log.e(TAG, "goToMove: uciMoves empty! game=${game?.let { "'${it.whitePlayer} vs ${it.blackPlayer}' movesUci.length=${it.movesUci.length} movesUci_preview='${it.movesUci.take(60)}' pgn.length=${it.pgn.length} pgn_preview='${it.pgn.take(120)}'" } ?: "null"}")
+        }
         val clamped = index.coerceIn(0, uciMoves.size)
+        Log.d(TAG, "goToMove: clamped=$clamped  currentMoveIndex=${_uiState.value.moveIndex}")
         val prev    = _uiState.value.moveIndex
-
         if (clamped > prev) checkMissedMoments(fromIndex = prev, toIndex = clamped)
-        applyMoveIndex(clamped)
+        viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(clamped) }
     }
 
-    fun stepForward()  = goToMove(_uiState.value.moveIndex + 1)
-    fun stepBackward() = goToMove(_uiState.value.moveIndex - 1)
-    fun goToStart()    = goToMove(0)
-    fun goToEnd()      = goToMove(uciMoves.size)
+    fun stepForward()  { Log.d(TAG, "stepForward  moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex + 1) }
+    fun stepBackward() { Log.d(TAG, "stepBackward moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex - 1) }
+    fun goToStart()    { Log.d(TAG, "goToStart");  goToMove(0) }
+    fun goToEnd()      { Log.d(TAG, "goToEnd");    goToMove(uciMoves.size) }
 
     /** Called when the user taps a move chip in the MoveTree. */
     fun onMoveNodeClick(nodeId: Long) = goToMove(nodeId.toInt())
@@ -171,7 +205,8 @@ class AnalysisViewModel(
 
     fun onArrowDrawn(from: Square, to: Square) {
         val cur   = _uiState.value.boardState
-        val arrow = Arrow(from, to, Color(0xCCF0A500.toInt()))
+        val color = _uiState.value.currentArrowColor
+        val arrow = Arrow(from, to, color)
         val upd   = if (cur.userArrows.any { it.from == from && it.to == to })
             cur.copy(userArrows = cur.userArrows.filter { !(it.from == from && it.to == to) })
         else
@@ -181,11 +216,13 @@ class AnalysisViewModel(
     }
 
     fun onSquareMarked(square: Square) {
-        val cur = _uiState.value.boardState
-        val upd = if (cur.markedSquares.any { it.square == square })
+        val cur   = _uiState.value.boardState
+        // Derive a semi-transparent mark color from the arrow color (same hue, alpha ~0x88)
+        val color = _uiState.value.currentArrowColor.copy(alpha = 0x88 / 255f)
+        val upd   = if (cur.markedSquares.any { it.square == square })
             cur.copy(markedSquares = cur.markedSquares.filter { it.square != square })
         else
-            cur.copy(markedSquares = cur.markedSquares + MarkedSquare(square, Color(0x88F0A500.toInt())))
+            cur.copy(markedSquares = cur.markedSquares + MarkedSquare(square, color))
         _uiState.update { it.copy(boardState = upd) }
         persistAnnotation(upd)
     }
@@ -261,13 +298,13 @@ class AnalysisViewModel(
     }
 
     /**
-     * Navigates to the missed critical position and activates the Guided Discovery panel
+     * Navigates to the missed critical position and activates Mentor mode
      * (Task 3.3) so the user cannot simply scroll past it again.
      */
     fun reviewMissedMoment() {
         val idx = _uiState.value.missedMomentMoveIndex ?: return
         dismissMissedMomentBanner()
-        enterGuidedDiscovery(idx)
+        enterMentorMode(targetMoveIndex = idx)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -279,31 +316,31 @@ class AnalysisViewModel(
      * Chooses questions based on the [CriticalMoment.ReasonCategory] for this move.
      */
     fun enterGuidedDiscovery(moveIndex: Int) {
-        val moment = _uiState.value.criticalMoments
+        val moment  = _uiState.value.criticalMoments
             .firstOrNull { it.moveIndex == moveIndex && it.type == CriticalMoment.Type.ENGINE_MARKED.name }
         val reason  = moment?.toReason() ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE
         val insight = InsightReconciler.forReason(reason)
-
-        // Navigate silently (bypass the goToMove guard)
         val clamped = moveIndex.coerceIn(0, uciMoves.size)
-        applyMoveIndex(clamped)
 
-        _uiState.update {
-            it.copy(
-                guidedDiscoveryMode              = true,
-                guidedDiscoveryInsight           = insight,
-                guidedDiscoveryCriticalMoment    = moment,
-                guidedDiscoveryThoughts          = "",
-                guidedDiscoveryHintVisible       = false,
-                guidedDiscoveryAnswerRevealed    = false,
-                guidedDiscoveryRevealedEvalCp    = null,
-                guidedDiscoveryEngineThinking    = false,
-                boardState                       = it.boardState.copy(
-                    isEditorMode = false,  // read-only during guided discovery
-                    arrows       = emptyList(),
-                ),
-                showMissedMomentBanner           = false,
-            )
+        viewModelScope.launch(Dispatchers.Default) {
+            applyMoveIndex(clamped)
+            _uiState.update {
+                it.copy(
+                    guidedDiscoveryMode           = true,
+                    guidedDiscoveryInsight        = insight,
+                    guidedDiscoveryCriticalMoment = moment,
+                    guidedDiscoveryThoughts       = "",
+                    guidedDiscoveryHintVisible    = false,
+                    guidedDiscoveryAnswerRevealed = false,
+                    guidedDiscoveryRevealedEvalCp = null,
+                    guidedDiscoveryEngineThinking = false,
+                    boardState                    = it.boardState.copy(
+                        isEditorMode = false,
+                        arrows       = emptyList(),
+                    ),
+                    showMissedMomentBanner = false,
+                )
+            }
         }
     }
 
@@ -320,7 +357,143 @@ class AnalysisViewModel(
                 guidedDiscoveryRevealedEvalCp = null,
             )
         }
-        applyMoveIndex(idx)   // re-apply with editor mode re-enabled
+        // Re-apply with editor mode re-enabled; must run off the main thread
+        viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — New mode system (Navigate / Analyse / Mentor)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Switches to Analyse mode (VIEW sub-mode). Editor mode off until user taps Edit. */
+    fun enterAnalyseMode() {
+        _uiState.update {
+            it.copy(
+                reviewMode     = ReviewMode.ANALYSE,
+                analyseSubMode = AnalyseSubMode.VIEW,
+                boardState     = it.boardState.copy(isEditorMode = false),
+            )
+        }
+    }
+
+    /** Generic mode setter — used by the "← Back" button to return to Navigate. */
+    fun setReviewMode(mode: ReviewMode) {
+        val needsEditorOff = mode != ReviewMode.ANALYSE ||
+            _uiState.value.analyseSubMode != AnalyseSubMode.EDIT
+        _uiState.update {
+            it.copy(
+                reviewMode = mode,
+                boardState = it.boardState.copy(
+                    isEditorMode = if (needsEditorOff) false else it.boardState.isEditorMode,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Switches between VIEW / EDIT / EXPLORE sub-modes inside Analyse.
+     * Entering EDIT activates [BoardState.isEditorMode]; leaving it deactivates.
+     * Entering EXPLORE is handled by [enterSandboxMode] instead.
+     */
+    fun setAnalyseSubMode(sub: AnalyseSubMode) {
+        if (sub == AnalyseSubMode.EXPLORE) { enterSandboxMode(); return }
+        _uiState.update {
+            it.copy(
+                analyseSubMode = sub,
+                boardState     = it.boardState.copy(isEditorMode = sub == AnalyseSubMode.EDIT),
+            )
+        }
+    }
+
+    /**
+     * Stores the current review mode, then opens Mentor mode at [targetMoveIndex]
+     * (defaults to the current move index). Navigation is frozen while in MENTOR.
+     * All state is set atomically inside the coroutine to avoid race conditions.
+     */
+    fun enterMentorMode(targetMoveIndex: Int = _uiState.value.moveIndex) {
+        val from    = _uiState.value.reviewMode
+        val moment  = _uiState.value.criticalMoments
+            .firstOrNull { it.moveIndex == targetMoveIndex && it.type == CriticalMoment.Type.ENGINE_MARKED.name }
+        val reason  = moment?.toReason() ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE
+        val insight = InsightReconciler.forReason(reason)
+        val clamped = targetMoveIndex.coerceIn(0, uciMoves.size)
+
+        viewModelScope.launch(Dispatchers.Default) {
+            applyMoveIndex(clamped)
+            _uiState.update {
+                it.copy(
+                    reviewMode                    = ReviewMode.MENTOR,
+                    previousReviewMode            = from,
+                    guidedDiscoveryMode           = true,
+                    guidedDiscoveryInsight        = insight,
+                    guidedDiscoveryCriticalMoment = moment,
+                    guidedDiscoveryThoughts       = "",
+                    guidedDiscoveryHintVisible    = false,
+                    guidedDiscoveryAnswerRevealed = false,
+                    guidedDiscoveryRevealedEvalCp = null,
+                    guidedDiscoveryEngineThinking = false,
+                    boardState                    = it.boardState.copy(
+                        isEditorMode = false,
+                        arrows       = emptyList(),
+                    ),
+                    showMissedMomentBanner = false,
+                )
+            }
+        }
+    }
+
+    /** Exits Mentor mode and returns to [previousReviewMode]. All state reset atomically. */
+    fun exitMentorMode() {
+        val returnTo = _uiState.value.previousReviewMode
+        val idx      = _uiState.value.moveIndex
+        _uiState.update {
+            it.copy(
+                reviewMode                    = returnTo,
+                guidedDiscoveryMode           = false,
+                guidedDiscoveryInsight        = null,
+                guidedDiscoveryCriticalMoment = null,
+                guidedDiscoveryAnswerRevealed = false,
+                guidedDiscoveryHintVisible    = false,
+                guidedDiscoveryRevealedEvalCp = null,
+            )
+        }
+        viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
+    }
+
+    /** Toggles the evaluation bar visibility. Reads eval from the truth map. */
+    fun toggleEvalBar() {
+        _uiState.update { it.copy(evalBarVisible = !it.evalBarVisible) }
+    }
+
+    /**
+     * Toggles best-move arrow visibility. When turning on, fires a quick engine analysis
+     * to fetch the best move UCI and draws it as an arrow on the board.
+     */
+    fun toggleBestMove() {
+        val newVisible = !_uiState.value.bestMoveVisible
+        _uiState.update { it.copy(bestMoveVisible = newVisible) }
+        if (newVisible) {
+            val fen = _uiState.value.boardState.fen
+            viewModelScope.launch(Dispatchers.Default) {
+                val result = runCatching { engine.analyzePosition(fen, depth = 10) }.getOrNull()
+                val arrow  = result?.toArrow()
+                _uiState.update { s ->
+                    s.copy(
+                        boardState = s.boardState.copy(
+                            arrows = if (arrow != null) listOf(arrow) else emptyList(),
+                        ),
+                    )
+                }
+            }
+        } else {
+            _uiState.update { it.copy(boardState = it.boardState.copy(arrows = emptyList())) }
+        }
+    }
+
+    /** Sets the annotation color used for arrows and square marks in Edit sub-mode.
+     *  Arrows use the full color; square marks automatically get a softer alpha (0x88). */
+    fun setArrowColor(color: Color) {
+        _uiState.update { it.copy(currentArrowColor = color) }
     }
 
     fun updateGuidedThoughts(text: String) {
@@ -431,7 +604,7 @@ class AnalysisViewModel(
                 refreshTreeItems()
             }
         }
-        exitGuidedDiscovery()
+        exitMentorMode()
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -445,21 +618,25 @@ class AnalysisViewModel(
             it.copy(
                 sandboxMode    = true,
                 blunderReflectionMode = false,
+                reviewMode     = ReviewMode.ANALYSE,
+                analyseSubMode = AnalyseSubMode.EXPLORE,
                 boardState     = it.boardState.copy(isEditorMode = true),
             )
         }
     }
 
     fun exitSandboxMode() {
+        val idx = _uiState.value.moveIndex
         _uiState.update {
             it.copy(
                 sandboxMode           = false,
                 blunderGuardActive    = false,
                 blunderReflectionMode = false,
                 sandboxEngineThinking = false,
+                analyseSubMode        = AnalyseSubMode.VIEW,
             )
         }
-        applyMoveIndex(_uiState.value.moveIndex)
+        viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
     }
 
     fun onSandboxSquareTap(square: Square) {
@@ -526,9 +703,32 @@ class AnalysisViewModel(
 
     private fun loadGame() {
         viewModelScope.launch(Dispatchers.IO) {
-            val game = repo.findById(gameId) ?: return@launch
-            uciMoves = game.movesUci.split(' ').filter { it.isNotBlank() }
+            val game = repo.findById(gameId) ?: run {
+                Log.e(TAG, "loadGame: game $gameId NOT FOUND in DB"); return@launch
+            }
+            Log.d(TAG, "loadGame: found game '${game.whitePlayer} vs ${game.blackPlayer}' movesUci.length=${game.movesUci.length} pgn.length=${game.pgn.length}")
+
+            // If movesUci is blank the game was imported before the PGN-comment-stripping
+            // fix landed.  Re-parse on the fly from the stored raw PGN so the user doesn't
+            // need to re-import.
+            val rawUci = if (game.movesUci.isNotBlank()) {
+                Log.d(TAG, "loadGame: using stored movesUci")
+                game.movesUci
+            } else {
+                Log.w(TAG, "loadGame: movesUci is blank — falling back to raw PGN parse")
+                extractUciMovesFromFullPgn(game.pgn)
+            }
+            uciMoves = rawUci.split(' ').filter { it.isNotBlank() }
+            Log.d(TAG, "loadGame: uciMoves.size=${uciMoves.size}  first3=${uciMoves.take(3)}")
             buildFenAndSanSequence()
+            Log.d(TAG, "loadGame: fenSequence.size=${fenSequence.size}  sanMoves.size=${sanMoves.size}")
+
+            // Pre-warm annotation cache so navigation never needs runBlocking on the main thread.
+            for (fen in fenSequence) {
+                if (!annotationCache.containsKey(fen)) {
+                    annotationCache[fen] = annotationDao.getByFen(fen)
+                }
+            }
 
             val storedMoments = criticalMomentDao.getByGameId(gameId)
             val openingEntry  = runCatching { opening.classifyByMoves(uciMoves.take(20)) }.getOrNull()
@@ -551,23 +751,38 @@ class AnalysisViewModel(
         val fens  = mutableListOf(START_FEN)
         val sans  = mutableListOf<String>()
         val board = Board().apply { loadFromFen(START_FEN) }
-        for (uci in uciMoves) {
+        for ((idx, uci) in uciMoves.withIndex()) {
             sans.add(runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci))
-            val move = uciToMove(board, uci) ?: break
-            board.doMove(move)
+            val move = uciToMove(board, uci)
+            if (move == null) {
+                Log.e(TAG, "buildFenAndSanSequence: uciToMove returned null for '$uci' at index $idx — stopping")
+                break
+            }
+            val applied = board.doMove(move)
+            if (!applied) {
+                Log.e(TAG, "buildFenAndSanSequence: board.doMove($uci) returned FALSE at index $idx — stopping")
+                break
+            }
             fens.add(board.fen)
         }
+        Log.d(TAG, "buildFenAndSanSequence: built ${fens.size} FENs for ${uciMoves.size} moves")
         fenSequence = fens
         sanMoves    = sans
     }
 
     private fun applyMoveIndex(index: Int) {
-        val fen      = fenSequence.getOrElse(index) { START_FEN }
-        val lastMove = if (index > 0) uciToMoveFromFens(index) else null
-        val annot    = getCachedAnnotation(fen)
-        val arrows   = annot?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
-        val marks    = annot?.markedSquaresJson?.let { parseMarks(it) } ?: emptyList()
-        val comment  = annot?.moveComment ?: ""
+        val fen = fenSequence.getOrElse(index) { START_FEN }
+        Log.d(TAG, "applyMoveIndex($index): fenSequence.size=${fenSequence.size}  fen=${fen.take(40)}")
+        val lastMove   = if (index > 0) uciToMoveFromFens(index) else null
+        val annot      = getCachedAnnotation(fen)
+        val arrows     = annot?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
+        val marks      = annot?.markedSquaresJson?.let { parseMarks(it) } ?: emptyList()
+        val comment    = annot?.moveComment ?: ""
+        // Editor mode active only in Analyse > EDIT sub-mode (read live state to avoid races)
+        val live       = _uiState.value
+        val inEditMode = live.reviewMode == ReviewMode.ANALYSE && live.analyseSubMode == AnalyseSubMode.EDIT
+        // Truth-map eval for this position (White-perspective centipawns)
+        val evalCp     = truthMap.find { it.moveIndex == index }?.evalCp
 
         _uiState.update { s ->
             s.copy(
@@ -579,15 +794,25 @@ class AnalysisViewModel(
                     legalMoves     = emptyList(),
                     userArrows     = arrows,
                     markedSquares  = marks,
-                    arrows         = emptyList(),   // clear engine arrows on navigation
-                    isEditorMode   = !s.guidedDiscoveryMode,
+                    arrows         = emptyList(),
+                    isEditorMode   = inEditMode,
                     showingFlash   = false,
                 ),
                 currentComment         = comment,
                 hasAnnotationAtCurrent = comment.isNotBlank() || arrows.isNotEmpty() || marks.isNotEmpty(),
                 treeItems              = buildTreeItems(index),
                 blunderGuardActive     = false,
+                mentorAvailable        = computeMentorAvailable(index),
+                currentEvalCp          = evalCp,
             )
+        }
+        Log.d(TAG, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")
+    }
+
+    /** True when there is an engine-marked critical moment at this move index. */
+    private fun computeMentorAvailable(index: Int): Boolean {
+        return _uiState.value.criticalMoments.any {
+            it.moveIndex == index && it.type == CriticalMoment.Type.ENGINE_MARKED.name
         }
     }
 
@@ -851,14 +1076,13 @@ class AnalysisViewModel(
         }
     }
 
-    private fun getCachedAnnotation(fen: String): PositionAnnotation? {
-        return if (annotationCache.containsKey(fen)) annotationCache[fen]
-        else {
-            val result = runBlocking { annotationDao.getByFen(fen) }
-            annotationCache[fen] = result
-            result
-        }
-    }
+    /**
+     * Returns the cached annotation for [fen].
+     * All game positions are pre-warmed during [loadGame]; new annotations are inserted
+     * into the cache immediately when saved, so this is always an O(1) map lookup —
+     * no DB access, no runBlocking, safe to call from the main thread.
+     */
+    private fun getCachedAnnotation(fen: String): PositionAnnotation? = annotationCache[fen]
 
     // ─── Parsing ─────────────────────────────────────────────────────────────
 
