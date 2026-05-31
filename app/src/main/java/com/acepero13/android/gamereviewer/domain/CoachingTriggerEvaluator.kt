@@ -57,6 +57,19 @@ object CoachingTriggerEvaluator {
     private const val FORCING_MOVE_MIN_CP_LOSS       = 100
     // PreMoveChecklist is a habit trigger — suppress it when the move played was not actually bad.
     private const val PRE_MOVE_CHECKLIST_MIN_CP_LOSS = 50
+    // When the player holds a significant advantage, suppress Development/Positional triggers and
+    // promote conversion coaching instead. Configurable — 500 cp = 5.0 pawns.
+    private const val CONVERSION_ADVANTAGE_THRESHOLD_CP = 500
+
+    // Coordinated Attack: 3+ non-pawn pieces aimed at the king zone = coordinated attack established.
+    // Attack dissolved when the count drops to ≤ 1.
+    private const val KING_ATTACK_FIRE_THRESHOLD  = 3
+    private const val KING_ATTACK_LOSS_THRESHOLD  = 1
+    // Piece Harmony: general coordination score (overlap squares) thresholds.
+    // Require a minimum delta to avoid noise from tiny fluctuations.
+    private const val HARMONY_FIRE_THRESHOLD      = 6
+    private const val HARMONY_LOSS_THRESHOLD      = 3
+    private const val HARMONY_MIN_DELTA           = 2
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -79,6 +92,12 @@ object CoachingTriggerEvaluator {
         // Worst-piece streak tracking: square name → consecutive-position count
         val worstPieceStreak = mutableMapOf<String, Int>()
 
+        // Coordination state — carried across moves to detect transitions only
+        var prevPlayerKingAttack   = 0
+        var prevOpponentKingAttack = 0
+        var prevPlayerHarmony      = 0
+        var prevOpponentHarmony    = 0
+
         sorted.forEachIndexed { i, eval ->
             val triggers  = mutableListOf<CoachingTrigger>()
             val prevEval  = if (i > 0) sorted[i - 1] else null
@@ -92,7 +111,11 @@ object CoachingTriggerEvaluator {
 
             // ── 1. Safety ─────────────────────────────────────────────────────
             if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
-                detectSafety(board, eval, playerIsWhite)?.let { triggers.add(it) }
+                val prevBoard: Board? = if (prevEval != null) runCatching {
+                    val fen = fenByMoveIndex(prevEval.moveIndex)
+                    if (fen.isBlank()) null else Board().apply { loadFromFen(fen) }
+                }.getOrNull() else null
+                detectSafety(board, eval, playerIsWhite, prevBoard)?.let { triggers.add(it) }
             }
 
             // ── 2. Candidate Moves ────────────────────────────────────────────
@@ -149,6 +172,84 @@ object CoachingTriggerEvaluator {
                 detectCctCheck(eval)?.let { triggers.add(it) }
             }
 
+            // ── 11. Coordination Triggers ─────────────────────────────────────────
+            // Fire only on state transitions (gained / lost) to avoid repeating on
+            // consecutive moves where coordination barely changes.
+            if (board != null && eval.moveIndex >= MIDDLEGAME_START) {
+                val playerSide   = if (playerIsWhite) Side.WHITE else Side.BLACK
+                val opponentSide = if (playerIsWhite) Side.BLACK else Side.WHITE
+
+                val newPlayerKingAttack   = CoordinationAnalyzer.kingAttackScore(board, playerSide)
+                val newOpponentKingAttack = CoordinationAnalyzer.kingAttackScore(board, opponentSide)
+                val newPlayerHarmony      = CoordinationAnalyzer.generalCoordinationScore(board, playerSide)
+                val newOpponentHarmony    = CoordinationAnalyzer.generalCoordinationScore(board, opponentSide)
+
+                // Player king attack
+                when {
+                    newPlayerKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevPlayerKingAttack < KING_ATTACK_FIRE_THRESHOLD ->
+                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = true, isLoss = false, pieceCount = newPlayerKingAttack))
+                    newPlayerKingAttack <= KING_ATTACK_LOSS_THRESHOLD && prevPlayerKingAttack >= KING_ATTACK_FIRE_THRESHOLD ->
+                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = true, isLoss = true, pieceCount = prevPlayerKingAttack))
+                }
+                // Opponent king attack
+                when {
+                    newOpponentKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevOpponentKingAttack < KING_ATTACK_FIRE_THRESHOLD ->
+                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = false, isLoss = false, pieceCount = newOpponentKingAttack))
+                    newOpponentKingAttack <= KING_ATTACK_LOSS_THRESHOLD && prevOpponentKingAttack >= KING_ATTACK_FIRE_THRESHOLD ->
+                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = false, isLoss = true, pieceCount = prevOpponentKingAttack))
+                }
+
+                // Player piece harmony (only when no CoordinatedAttack fired for the player this move)
+                val playerAttackFired = triggers.any { it is CoachingTrigger.CoordinatedAttack && it.isPlayerSide }
+                if (!playerAttackFired) {
+                    val delta = newPlayerHarmony - prevPlayerHarmony
+                    when {
+                        newPlayerHarmony >= HARMONY_FIRE_THRESHOLD && prevPlayerHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA ->
+                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = true, isLoss = false, score = newPlayerHarmony))
+                        newPlayerHarmony <= HARMONY_LOSS_THRESHOLD && prevPlayerHarmony >= HARMONY_FIRE_THRESHOLD && kotlin.math.abs(delta) >= HARMONY_MIN_DELTA ->
+                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = true, isLoss = true, score = prevPlayerHarmony))
+                    }
+                }
+
+                // Opponent piece harmony (only when no CoordinatedAttack fired for the opponent this move)
+                val opponentAttackFired = triggers.any { it is CoachingTrigger.CoordinatedAttack && !it.isPlayerSide }
+                if (!opponentAttackFired) {
+                    val delta = newOpponentHarmony - prevOpponentHarmony
+                    when {
+                        newOpponentHarmony >= HARMONY_FIRE_THRESHOLD && prevOpponentHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA ->
+                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = false, isLoss = false, score = newOpponentHarmony))
+                        newOpponentHarmony <= HARMONY_LOSS_THRESHOLD && prevOpponentHarmony >= HARMONY_FIRE_THRESHOLD && kotlin.math.abs(delta) >= HARMONY_MIN_DELTA ->
+                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = false, isLoss = true, score = prevOpponentHarmony))
+                    }
+                }
+
+                prevPlayerKingAttack   = newPlayerKingAttack
+                prevOpponentKingAttack = newOpponentKingAttack
+                prevPlayerHarmony      = newPlayerHarmony
+                prevOpponentHarmony    = newOpponentHarmony
+            }
+
+            // ── 12. Conversion Strategy / Advantage Handler ───────────────────────
+            // When the position is clearly decided (either side ahead > 4.0 pawns),
+            // positional development coaching is a distraction. Suppress those triggers
+            // and, when it is the player's turn and they are the winning side, inject a
+            // conversion-focused coaching prompt instead.
+            val evalFromPlayer = if (playerIsWhite) eval.evalCp else -eval.evalCp
+            if (kotlin.math.abs(eval.evalCp) > CONVERSION_ADVANTAGE_THRESHOLD_CP) {
+                triggers.removeAll {
+                    it is CoachingTrigger.RookActivation    ||
+                    it is CoachingTrigger.CandidateMoves    ||
+                    it is CoachingTrigger.WorstPiece        ||
+                    it is CoachingTrigger.CandidateSearch   ||
+                    it is CoachingTrigger.OpponentPlan      ||
+                    it is CoachingTrigger.CoordinatedAttack ||
+                    it is CoachingTrigger.PieceHarmony
+                }
+            }
+            if (evalFromPlayer > CONVERSION_ADVANTAGE_THRESHOLD_CP) {
+                triggers.add(CoachingTrigger.ConversionStrategy(eval.moveIndex, eval.evalCp))
+            }
+
             if (triggers.isNotEmpty()) {
                 // Prioritize high-severity triggers: if Safety fires at this position,
                 // remove generic pedagogical prompts to avoid noise.
@@ -184,7 +285,12 @@ object CoachingTriggerEvaluator {
 
     // ── Private: individual trigger detectors ──────────────────────────────────
 
-    private fun detectSafety(board: Board, eval: GameEvaluation, isWhite: Boolean): CoachingTrigger.Safety? {
+    private fun detectSafety(
+        board: Board,
+        eval: GameEvaluation,
+        isWhite: Boolean,
+        prevBoard: Board? = null,
+    ): CoachingTrigger.Safety? {
         val movingSide   = if (isWhite) Side.WHITE else Side.BLACK
         val opponentSide = if (isWhite) Side.BLACK else Side.WHITE
         val kingSquare   = BoardAttackHelper.kingSquare(board, movingSide) ?: return null
@@ -209,12 +315,27 @@ object CoachingTriggerEvaluator {
 
         // Distinguish structural exposure from real tactical danger:
         //   - Significant evaluation drop (≥ SAFETY_MIN_CP_DROP) → real consequence visible in engine
-        //   - Opponent piece directly attacking a king-adjacent square → immediate tactical threat
+        //   - Opponent piece directly attacking a king-adjacent square AND the move worsened it
         // Either condition alone justifies the coaching prompt; neither alone is structural.
-        val moverDelta       = if (isWhite) eval.evalDelta else -eval.evalDelta
+        val moverDelta        = if (isWhite) eval.evalDelta else -eval.evalDelta
         val isSignificantDrop = moverDelta <= -SAFETY_MIN_CP_DROP
 
         if (!isSignificantDrop && !hasDirectAttack) return null
+
+        // Delta guard for direct-attack path: if the eval drop is below the threshold, only fire
+        // when the move itself *worsened* king safety (attacker count increased). Pre-existing
+        // structural exposure (king already on f2, attacks already present) must not trigger
+        // SAFETY for unrelated developmental moves like Bb5.
+        if (hasDirectAttack && !isSignificantDrop && prevBoard != null) {
+            val prevKingSquare   = BoardAttackHelper.kingSquare(prevBoard, movingSide) ?: kingSquare
+            val prevAdjacent     = adjacentSquares(prevKingSquare)
+            val prevMaxAttackers = prevAdjacent.maxOfOrNull { sq ->
+                BoardAttackHelper.attackersOf(prevBoard, sq, opponentSide).size
+            } ?: 0
+            val currentMaxAttackers = mostAttackedEntry?.value ?: 0
+            // Attack level did not increase — this is pre-existing exposure, not caused by the move.
+            if (currentMaxAttackers <= prevMaxAttackers) return null
+        }
 
         val threatSquare = if (hasDirectAttack) mostAttackedEntry?.key?.name else null
         return CoachingTrigger.Safety(eval.moveIndex, kingSquare.name, threatSquare)

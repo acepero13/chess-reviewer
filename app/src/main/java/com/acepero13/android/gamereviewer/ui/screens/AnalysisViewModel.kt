@@ -717,16 +717,19 @@ class AnalysisViewModel(
                 appendLine("**Panel source:** Proactive Coaching (CoachingTriggerEvaluator.kt)")
                 appendLine("**Trigger class:** CoachingTrigger.${t::class.simpleName}")
                 val props = when (t) {
-                    is CoachingTrigger.Safety           -> "kingSquare=${t.kingSquare}"
-                    is CoachingTrigger.CandidateMoves   -> "evalCp=${t.evalCp}"
-                    is CoachingTrigger.WorstPiece       -> "pieceSquare=${t.pieceSquare}, mobility=${t.mobility}"
-                    is CoachingTrigger.ForcingMove      -> "motif=${t.motif}"
-                    is CoachingTrigger.OpponentPlan     -> "evalGain=${t.evalGain}"
-                    is CoachingTrigger.PreMoveChecklist -> "hangingSquare=${t.hangingSquare}"
-                    is CoachingTrigger.RookActivation   -> "rookSquare=${t.rookSquare}, openFileIndex=${t.openFileIndex}"
-                    is CoachingTrigger.ImpulseControl   -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
-                    is CoachingTrigger.CandidateSearch  -> "evalCp=${t.evalCp}"
-                    is CoachingTrigger.CctCheck         -> "evalDelta=${t.evalDelta}"
+                    is CoachingTrigger.Safety              -> "kingSquare=${t.kingSquare}"
+                    is CoachingTrigger.CandidateMoves      -> "evalCp=${t.evalCp}"
+                    is CoachingTrigger.WorstPiece          -> "pieceSquare=${t.pieceSquare}, mobility=${t.mobility}"
+                    is CoachingTrigger.ForcingMove         -> "motif=${t.motif}"
+                    is CoachingTrigger.OpponentPlan        -> "evalGain=${t.evalGain}"
+                    is CoachingTrigger.PreMoveChecklist    -> "hangingSquare=${t.hangingSquare}"
+                    is CoachingTrigger.RookActivation      -> "rookSquare=${t.rookSquare}, openFileIndex=${t.openFileIndex}"
+                    is CoachingTrigger.ImpulseControl      -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
+                    is CoachingTrigger.CandidateSearch     -> "evalCp=${t.evalCp}"
+                    is CoachingTrigger.CctCheck            -> "evalDelta=${t.evalDelta}"
+                    is CoachingTrigger.ConversionStrategy  -> "evaluationCp=${t.evaluationCp}"
+                    is CoachingTrigger.CoordinatedAttack   -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, pieceCount=${t.pieceCount}"
+                    is CoachingTrigger.PieceHarmony        -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, score=${t.score}"
                 }
                 appendLine("**Trigger properties:** $props")
             }

@@ -311,6 +311,144 @@ object InsightReconciler {
                 "move types. Most tactical losses occur not because a player cannot calculate, " +
                 "but because they forgot to look.",
         )
+
+        is CoachingTrigger.ConversionStrategy -> {
+            val advantagePawns = "%.1f".format(kotlin.math.abs(trigger.evaluationCp) / 100.0)
+            Insight(
+                emoji       = "♛",
+                title       = "Convert the Advantage",
+                description = "You are significantly ahead in material (+${advantagePawns} pawns). " +
+                    "In winning positions, the priority shifts from finding the best plan to " +
+                    "avoiding the mistakes that let opponents back into the game.",
+                questions   = listOf(
+                    "You are significantly ahead in material — what is the simplest path to victory from here?",
+                    "Can you identify any forced trades that would reduce complexity and bring the win closer?",
+                    "Are there any unnecessary risks in your position that your opponent could exploit?",
+                ),
+                conceptualHint = "In winning positions, Silman's rule applies: simplify. " +
+                    "Swap off pieces to reduce the opponent's counterplay, keep your King safe, " +
+                    "and avoid speculative sacrifices. The goal is not the most brilliant win — " +
+                    "it is the most reliable win. Ask: 'Does this move make my advantage harder to convert?'",
+            )
+        }
+
+        is CoachingTrigger.CoordinatedAttack -> when {
+            trigger.isPlayerSide && !trigger.isLoss -> Insight(
+                emoji       = "🗡️",
+                title       = "Attack is Coming Together",
+                description = "${trigger.pieceCount} of your pieces are now targeting the opponent's king zone. " +
+                    "Coordinated attacks are decisive when all pieces contribute to the same focal point.",
+                questions   = listOf(
+                    "Which of your attacking pieces is the most dangerous right now — and is it safe from counterattack?",
+                    "Can your opponent disrupt the coordination with a counter-threat or defensive exchange?",
+                    "What square does your attack converge on, and can you add one more piece to it?",
+                ),
+                conceptualHint = "Coordinated attacks win when all pieces aim at the same weakness. " +
+                    "The principle: every piece must have a role. Ask 'What is this piece contributing to the attack?' " +
+                    "for each of your pieces. Idle pieces that can join the attack should do so immediately.",
+            )
+            trigger.isPlayerSide && trigger.isLoss -> Insight(
+                emoji       = "💨",
+                title       = "Attack Has Dissolved",
+                description = "Your coordinated attack on the king has broken down. " +
+                    "Attacks that lose momentum often leave the attacker overextended.",
+                questions   = listOf(
+                    "Which piece drifted away from the attack — was it traded off, or did you redirect it?",
+                    "Can you reroute a piece back into the attack in one or two moves?",
+                    "Did your opponent defend accurately, or did you lose the coordination thread first?",
+                ),
+                conceptualHint = "When attacks dissolve, the danger is that your pieces become scattered. " +
+                    "Regroup before pushing forward: bring all pieces back into harmony first. " +
+                    "A second attack wave, if properly coordinated, is often stronger than the first.",
+            )
+            !trigger.isPlayerSide && !trigger.isLoss -> Insight(
+                emoji       = "🛡️",
+                title       = "Opponent Building Coordinated Attack",
+                description = "${trigger.pieceCount} of your opponent's pieces are now targeting your king zone. " +
+                    "Recognising a coordinated attack early is the key to defending successfully.",
+                questions   = listOf(
+                    "Which of your opponent's pieces is the most dangerous attacker right now?",
+                    "Can you trade off their most active attacking piece without weakening your own position?",
+                    "Is your king safe enough to ignore this and pursue counterplay, or must you defend first?",
+                ),
+                conceptualHint = "Against a coordinated attack, the principle is: eliminate the most dangerous attacker. " +
+                    "This is often the piece closest to your king. " +
+                    "If you cannot trade it off, create a counter-threat — your opponent must then choose between attack and defence.",
+            )
+            else -> Insight(
+                emoji       = "✨",
+                title       = "Opponent's Attack Has Broken Down",
+                description = "The coordinated attack your opponent was building has fallen apart. " +
+                    "Disorganised attacking pieces often become targets themselves.",
+                questions   = listOf(
+                    "What caused the coordination to fall apart — a piece trade, a defensive move, or a mistake?",
+                    "Can you immediately counterattack against the now-scattered pieces?",
+                    "Is this the moment to open the position and exploit the disorganization?",
+                ),
+                conceptualHint = "When an opponent's attack dissolves, their pieces are often misplaced. " +
+                    "The counter-principle: transition to counterplay. Open lines with a pawn break, " +
+                    "activate your own pieces, and target the pieces that are no longer coordinating.",
+            )
+        }
+
+        is CoachingTrigger.PieceHarmony -> when {
+            trigger.isPlayerSide && !trigger.isLoss -> Insight(
+                emoji       = "🎶",
+                title       = "Pieces Working in Harmony",
+                description = "Your pieces are sharing targets and supporting each other across the board. " +
+                    "Maintaining this coordination is as important as building it.",
+                questions   = listOf(
+                    "Which piece just joined the coordination — what plan does it now contribute to?",
+                    "Are all of your pieces pointed at the same strategic goal, or is any piece 'off-key'?",
+                    "Can you maintain this harmony for the next few moves, or will your opponent force a disruption?",
+                ),
+                conceptualHint = "Piece harmony means every piece has a clear role in the same plan. " +
+                    "The test: can you name what each piece is doing? " +
+                    "If a piece has no role in the current plan, it should be rerouted immediately.",
+            )
+            trigger.isPlayerSide && trigger.isLoss -> Insight(
+                emoji       = "🔀",
+                title       = "Pieces Have Lost Coordination",
+                description = "Your pieces are no longer working together — they have drifted onto different plans. " +
+                    "Disorganised pieces are vulnerable to tactical counterplay.",
+                questions   = listOf(
+                    "Which piece is now misplaced — can you identify the one that no longer fits the position?",
+                    "Can you re-route it in one or two moves to rejoin the coordination?",
+                    "Is your opponent able to exploit the current disorganisation with a tactical shot?",
+                ),
+                conceptualHint = "Lost coordination is often the prelude to tactical problems. " +
+                    "The remedy: find your worst-placed piece and improve it first. " +
+                    "Nimzowitsch's principle: if you cannot find a plan, improve your worst piece.",
+            )
+            !trigger.isPlayerSide && !trigger.isLoss -> Insight(
+                emoji       = "👁️",
+                title       = "Opponent's Pieces Are Well Coordinated",
+                description = "Your opponent's pieces are sharing targets and supporting each other. " +
+                    "Coordinated pieces are difficult to fight piecemeal — you must address the whole system.",
+                questions   = listOf(
+                    "What plan do all of your opponent's coordinated pieces support together?",
+                    "Which piece is the key to their coordination — the 'conductor' of the plan?",
+                    "Can you disrupt the coordination with a pawn break, an exchange sacrifice, or a counter-threat?",
+                ),
+                conceptualHint = "Coordinated pieces are stronger than the sum of their parts. " +
+                    "To fight coordination, disrupt it: force your opponent to react to your threats " +
+                    "rather than pursuing their plan. A well-timed pawn break or sacrifice can shatter coordination instantly.",
+            )
+            else -> Insight(
+                emoji       = "🔓",
+                title       = "Opponent's Coordination Has Broken Down",
+                description = "Your opponent's pieces have lost their harmony and are no longer working together. " +
+                    "This is the moment to act decisively before they regroup.",
+                questions   = listOf(
+                    "Which of your opponent's pieces is now most out of play?",
+                    "Can you open the position now to exploit the lack of coordination?",
+                    "Is this a good time to create a new weakness — a passed pawn, an outpost, or an open file?",
+                ),
+                conceptualHint = "Exploit disorganized pieces immediately — they will regroup if given time. " +
+                    "Create concrete threats that force your opponent to react on your terms. " +
+                    "Open lines, activate your own pieces, and target the misplaced pieces before they find their best squares.",
+            )
+        }
     }
 
     // ── By motif (Blunder Guard reflection) ───────────────────────────────────

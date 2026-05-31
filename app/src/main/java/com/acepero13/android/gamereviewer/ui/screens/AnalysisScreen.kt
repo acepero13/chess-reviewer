@@ -619,6 +619,7 @@ private val WrongAmber       = Color(0xFFF0A500)
 private val REFLECTION_LABELS = listOf(
     "Safety Issue", "Multiple Plans", "Restricted Piece",
     "Forcing Move", "Opponent's Plan", "Pre-Move Check", "Rook Activation",
+    "Conversion Strategy",
 )
 
 @Composable
