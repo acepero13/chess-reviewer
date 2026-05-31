@@ -763,6 +763,73 @@ class AnalysisViewModel(
         }
     }
 
+    private fun buildMiddlegamePlanEvalPrompt(c: com.acepero13.android.gamereviewer.domain.MiddlegamePlanClassification): String {
+        val insights = c.plans.map { InsightReconciler.forMiddlegamePlan(it) }
+        return buildString {
+            appendLine("## Position")
+            appendLine()
+            appendLine("FEN: ${c.fen}")
+            appendLine("Move index: ${c.moveIndex}")
+            appendLine("Game phase: Middlegame")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## Detected Plans (${c.plans.size})")
+            appendLine()
+            c.plans.forEachIndexed { i, plan ->
+                val ins = insights.getOrNull(i)
+                appendLine("### Plan ${i + 1}: ${plan.title}")
+                appendLine("**Type:** ${plan.type}")
+                appendLine("**Priority:** ${plan.priority}")
+                plan.affectedFile?.let { appendLine("**Affected file:** $it") }
+                appendLine("**Advice:** ${plan.planAdvice}")
+                if (ins != null) {
+                    appendLine()
+                    appendLine("**Coaching output for this plan:**")
+                    appendLine("Title: ${ins.title}")
+                    appendLine("Description: ${ins.description}")
+                    appendLine("Questions shown to user:")
+                    ins.questions.forEachIndexed { qi, q -> appendLine("  ${qi + 1}. $q") }
+                    appendLine("Conceptual hint: ${ins.conceptualHint}")
+                }
+                appendLine()
+            }
+        }
+    }
+
+    private fun buildEndgameEvalPrompt(c: com.acepero13.android.gamereviewer.domain.EndgameClassification): String {
+        val insight = InsightReconciler.forEndgame(chapter = c.entry.chapter, name = c.entry.name)
+        return buildString {
+            appendLine("## Position")
+            appendLine()
+            appendLine("FEN: ${c.fen}")
+            appendLine("First endgame move index: ${c.firstEndgameMoveIndex}")
+            appendLine("Game phase: Endgame")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## Endgame Classification")
+            appendLine()
+            appendLine("**Name:** ${c.entry.name}")
+            appendLine("**Chapter:** ${c.entry.chapter} of *100 Endgames You Should Know*")
+            appendLine("**Category:** ${c.entry.category}")
+            appendLine("**Material signature:** ${c.entry.materialSignature}")
+            appendLine("**Study advice:** ${c.entry.studyAdvice}")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## App's coaching output")
+            appendLine()
+            appendLine("**Title:** ${insight.title}")
+            appendLine("**Description:** ${insight.description}")
+            appendLine()
+            appendLine("**Questions shown to user:**")
+            insight.questions.forEachIndexed { i, q -> appendLine("${i + 1}. $q") }
+            appendLine()
+            appendLine("**Conceptual hint:** ${insight.conceptualHint}")
+        }
+    }
+
     /**
      * Navigates to the missed critical position and activates Mentor mode
      * (Task 3.3) so the user cannot simply scroll past it again.

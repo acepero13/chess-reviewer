@@ -52,6 +52,11 @@ object CoachingTriggerEvaluator {
     // that are still physically blocked by unmoved knights/bishops.
     private const val ROOK_ACTIVATION_MIN_HALF_MOVE       = 24
     private const val ROOK_ACTIVATION_MIN_DEVELOPED_MINORS = 2
+    // ForcingMove only fires when the mover missed a significant tactical opportunity.
+    // Suppress when the played move itself was good (e.g., the user captured the hanging piece).
+    private const val FORCING_MOVE_MIN_CP_LOSS       = 100
+    // PreMoveChecklist is a habit trigger — suppress it when the move played was not actually bad.
+    private const val PRE_MOVE_CHECKLIST_MIN_CP_LOSS = 50
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -118,7 +123,7 @@ object CoachingTriggerEvaluator {
             // Suppress in the opening unless there is a genuine mistake — tension
             // (gambits, accepted pawns) is intentional and should not be flagged.
             if (board != null) {
-                detectPreMoveChecklist(board, eval.moveIndex)
+                detectPreMoveChecklist(board, eval)
                     ?.takeIf { eval.moveIndex >= MIDDLEGAME_START || eval.evalDelta <= OPENING_TRIGGER_THRESHOLD_CP }
                     ?.let { triggers.add(it) }
             }
@@ -145,7 +150,15 @@ object CoachingTriggerEvaluator {
             }
 
             if (triggers.isNotEmpty()) {
-                result[eval.moveIndex] = triggers
+                // Prioritize high-severity triggers: if Safety fires at this position,
+                // remove generic pedagogical prompts to avoid noise.
+                val hasSafety = triggers.any { it is CoachingTrigger.Safety }
+                if (hasSafety) {
+                    triggers.removeAll { it is CoachingTrigger.ForcingMove || it is CoachingTrigger.PreMoveChecklist }
+                }
+                if (triggers.isNotEmpty()) {
+                    result[eval.moveIndex] = triggers
+                }
             }
         }
 
@@ -251,9 +264,12 @@ object CoachingTriggerEvaluator {
     }
 
     private fun detectForcingMove(eval: GameEvaluation): CoachingTrigger.ForcingMove? {
-        return if (eval.motif in listOf("fork", "hanging", "checkmate")) {
-            CoachingTrigger.ForcingMove(eval.moveIndex, eval.motif)
-        } else null
+        if (eval.motif !in listOf("fork", "hanging", "checkmate")) return null
+        // Only fire when the mover actually missed the forcing sequence.
+        // If evalDelta is near zero or positive, the player either played the tactic or
+        // was unaffected — no coaching noise needed.
+        if (eval.evalDelta > -FORCING_MOVE_MIN_CP_LOSS) return null
+        return CoachingTrigger.ForcingMove(eval.moveIndex, eval.motif)
     }
 
     private fun detectOpponentPlan(
@@ -269,14 +285,18 @@ object CoachingTriggerEvaluator {
         } else null
     }
 
-    private fun detectPreMoveChecklist(board: Board, moveIndex: Int): CoachingTrigger.PreMoveChecklist? {
+    private fun detectPreMoveChecklist(board: Board, eval: GameEvaluation): CoachingTrigger.PreMoveChecklist? {
+        // Suppress on neutral or strong moves — the habit prompt only makes sense when
+        // the player actually missed a hanging piece, not when they took it.
+        if (eval.evalDelta > -PRE_MOVE_CHECKLIST_MIN_CP_LOSS) return null
+
         val hangingSquare = BoardAttackHelper.allPieces(board)
             .filter { (_, piece) -> piece.pieceType != PieceType.KING }
             .firstOrNull { (sq, piece) -> isGenuinelyHanging(board, sq, piece) }
             ?.first
 
         return if (hangingSquare != null) {
-            CoachingTrigger.PreMoveChecklist(moveIndex, hangingSquare.name)
+            CoachingTrigger.PreMoveChecklist(eval.moveIndex, hangingSquare.name)
         } else null
     }
 

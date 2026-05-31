@@ -215,7 +215,8 @@ fun AnalysisScreen(
     }
 
     val devPanelActive = state.developerModeEnabled &&
-        (state.showProactiveCoaching || state.guidedDiscoveryMode)
+        (state.showProactiveCoaching || state.guidedDiscoveryMode ||
+         state.showMiddlegamePlanPanel || state.showEndgameRecognitionPanel)
 
     Scaffold(
         containerColor = WCDark,
