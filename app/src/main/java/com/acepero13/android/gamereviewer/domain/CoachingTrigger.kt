@@ -11,8 +11,8 @@ package com.acepero13.android.gamereviewer.domain
  */
 sealed class CoachingTrigger(val moveIndex: Int) {
 
-    /** King has ≤ 1 friendly adjacent pieces — exposure risk. */
-    class Safety(moveIndex: Int, val kingSquare: String) : CoachingTrigger(moveIndex)
+    /** King has ≤ 1 friendly adjacent pieces AND a significant eval drop or direct attacker — tactical exposure. */
+    class Safety(moveIndex: Int, val kingSquare: String, val threatSquare: String? = null) : CoachingTrigger(moveIndex)
 
     /** Position is balanced (±30cp, no tactical motif) — multiple plans available. */
     class CandidateMoves(moveIndex: Int, val evalCp: Int) : CoachingTrigger(moveIndex)
@@ -84,7 +84,10 @@ sealed class CoachingTrigger(val moveIndex: Int) {
 
     fun coachingQuestion(): String = when (this) {
         is Safety           ->
-            "You just moved a piece away from your King. Can you see any immediate threats to your King's safety?"
+            if (threatSquare != null)
+                "The $threatSquare square is a focal point for your opponent's pieces. Is your King under immediate tactical danger there?"
+            else
+                "Your King has very few defenders nearby. Are there any forcing lines that could exploit that exposure right now?"
         is CandidateMoves   ->
             "This is a balanced position. Instead of finding the 'best' move, can you identify two different plans here?"
         is WorstPiece       ->

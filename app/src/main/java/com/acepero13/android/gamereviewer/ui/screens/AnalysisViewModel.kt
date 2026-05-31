@@ -97,6 +97,41 @@ data class ClassificationOption(
     val category:    com.acepero13.android.gamereviewer.data.model.CriticalMoment.ReasonCategory,
 )
 
+/** Player's pre-game prediction about what went wrong. */
+enum class GamePrediction(
+    val emoji:       String,
+    val label:       String,
+    val description: String,
+) {
+    SPECIFIC_BLUNDER(
+        emoji       = "🎯",
+        label       = "I blundered somewhere specific",
+        description = "A tactical oversight or material loss",
+    ),
+    TIME_PRESSURE(
+        emoji       = "⏱️",
+        label       = "I lost on time / rushed",
+        description = "Clock pressure forced inaccurate moves",
+    ),
+    OUTPLAYED_POSITIONALLY(
+        emoji       = "🧭",
+        label       = "I got outplayed positionally",
+        description = "Gradual squeeze or strategic errors",
+    ),
+    NOT_SURE(
+        emoji       = "🔍",
+        label       = "Not sure — let the engine decide",
+        description = "Let the analysis reveal what went wrong",
+    ),
+}
+
+/** Outcome of comparing the player's pre-game prediction to engine findings. */
+data class PredictionMatchResult(
+    val isAccurate: Boolean,
+    val headline:   String,
+    val detail:     String? = null,
+)
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 data class AnalysisUiState(
@@ -265,6 +300,10 @@ data class AnalysisUiState(
     // ── Structured Analysis Prompts (position coach) ──────────────────────────
     /** Mirrors the setting — false = card never shown regardless of highlights. */
     val positionCoachEnabled: Boolean = false,
+
+    // ── Developer Options ─────────────────────────────────────────────────────
+    /** When true, a "Copy LLM Prompt" button appears next to active coaching panels. */
+    val developerModeEnabled: Boolean = false,
     /** Move indices where the user has already dismissed the coach card this session. */
     val positionCoachDismissedMoves: Set<Int> = emptySet(),
 
@@ -291,6 +330,24 @@ data class AnalysisUiState(
     val showMiddlegamePlanPanel: Boolean = false,
     /** True once the user has dismissed the panel — prevents it re-appearing on re-navigation. */
     val middlegamePlanPanelDismissed: Boolean = false,
+
+    // ── Pre-game prediction gate ──────────────────────────────────────────────
+    /** True while the prediction overlay is shown (before the user starts navigating). */
+    val showPredictionGate: Boolean = false,
+    /** The prediction the user selected before starting the review. Null if skipped. */
+    val gamePrediction: GamePrediction? = null,
+
+    // ── Game story headline ───────────────────────────────────────────────────
+    /** One-sentence narrative computed after background analysis completes. */
+    val gameStory: String = "",
+    /** True once the user has dismissed the story card. */
+    val gameStoryDismissed: Boolean = false,
+
+    // ── Post-game debrief ─────────────────────────────────────────────────────
+    /** True when the user has navigated to the end of the game and analysis is done. */
+    val showPostGameDebrief: Boolean = false,
+    /** Comparison of the player's prediction vs engine findings. */
+    val predictionMatchResult: PredictionMatchResult? = null,
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -511,6 +568,199 @@ class AnalysisViewModel(
 
     fun dismissMiddlegamePlanPanel() {
         _uiState.update { it.copy(showMiddlegamePlanPanel = false, middlegamePlanPanelDismissed = true) }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Pre-game prediction & post-game debrief
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun submitPrediction(prediction: GamePrediction) {
+        _uiState.update { it.copy(showPredictionGate = false, gamePrediction = prediction) }
+    }
+
+    fun skipPrediction() {
+        _uiState.update { it.copy(showPredictionGate = false) }
+    }
+
+    fun dismissGameStory() {
+        _uiState.update { it.copy(gameStoryDismissed = true) }
+    }
+
+    fun dismissPostGameDebrief() {
+        _uiState.update { it.copy(showPostGameDebrief = false) }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Developer / Coach Accuracy Debug
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Builds a filled-in LLM evaluation prompt for the currently active coaching panel.
+     * Returns null when developer mode is off or no coaching panel is active.
+     *
+     * The returned string can be copied to the clipboard and pasted into any LLM
+     * to verify whether the coaching comment is accurate and pedagogically sound.
+     */
+    fun buildCoachEvalPrompt(): String? {
+        val s   = _uiState.value
+        val idx = s.moveIndex
+        if (idx <= 0 || fenSequence.size < idx) return null
+
+        val fenBefore  = fenSequence[idx - 1]
+        val san        = if (sanMoves.size >= idx) sanMoves[idx - 1] else "?"
+        val isWhite    = idx % 2 == 1
+        val colorLabel = if (isWhite) "White" else "Black"
+        val moveNumber = (idx + 1) / 2
+
+        val evalBefore = truthMap.getOrNull(idx - 1)?.evalCp
+        val evalAfter  = truthMap.getOrNull(idx)?.evalCp
+        val cpLoss     = if (evalBefore != null && evalAfter != null) {
+            val delta = evalAfter - evalBefore
+            if (isWhite) -delta else delta
+        } else null
+
+        fun fmt(cp: Int?) = when {
+            cp == null   -> "N/A"
+            cp > 9000    -> "Forced mate (White)"
+            cp < -9000   -> "Forced mate (Black)"
+            else         -> "%+.2f".format(cp / 100.0)
+        }
+
+        // GameHighlights and coaching triggers at this move — used for both
+        // the phase field (more accurate than heuristic) and the debug section.
+        val highlightsHere   = s.gameHighlights.filter { it.moveIndex == idx }
+        val triggersHere     = s.triggersByMove[idx] ?: emptyList()
+
+        val phase = highlightsHere.firstOrNull()?.phase?.name?.lowercase()
+            ?.replaceFirstChar { it.uppercase() }
+            ?: when {
+                idx <= 15 -> "Opening"
+                idx <= 35 -> "Middlegame"
+                else      -> "Endgame"
+            }
+
+        val triggerType: String
+        val insight: InsightReconciler.Insight
+        val criticalMoment = s.guidedDiscoveryCriticalMoment
+
+        when {
+            s.guidedDiscoveryMode && s.guidedDiscoveryInsight != null -> {
+                triggerType = criticalMoment?.reasonCategory ?: "UNKNOWN"
+                insight     = s.guidedDiscoveryInsight
+            }
+            s.showProactiveCoaching && s.activeProactiveTrigger != null -> {
+                triggerType = s.activeProactiveTrigger.typeName()
+                insight     = InsightReconciler.forTrigger(s.activeProactiveTrigger)
+            }
+            s.showMiddlegamePlanPanel && s.middlegamePlanClassification != null -> {
+                return buildMiddlegamePlanEvalPrompt(s.middlegamePlanClassification)
+            }
+            s.showEndgameRecognitionPanel && s.endgameClassification != null -> {
+                return buildEndgameEvalPrompt(s.endgameClassification)
+            }
+            else -> return null
+        }
+
+        val questions = insight.questions
+            .mapIndexed { i, q -> "${i + 1}. $q" }
+            .joinToString("\n")
+
+        return buildString {
+            appendLine("## Position")
+            appendLine()
+            appendLine("FEN: $fenBefore")
+            appendLine()
+            appendLine("Move played: $san")
+            appendLine("Color to move: $colorLabel")
+            appendLine("Move number: $moveNumber")
+            appendLine()
+            appendLine("Game phase: $phase")
+            appendLine()
+            appendLine("Engine evaluation BEFORE move: ${fmt(evalBefore)}")
+            appendLine("Engine evaluation AFTER move:  ${fmt(evalAfter)}")
+            appendLine("Centipawn loss: ${if (cpLoss != null) "$cpLoss cp" else "N/A"}")
+            appendLine()
+            appendLine("Engine best move: N/A")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## Coaching trigger type")
+            appendLine()
+            appendLine(triggerType)
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## App's coaching output")
+            appendLine()
+            appendLine("**Title:** ${insight.title}")
+            appendLine()
+            appendLine("**Description:** ${insight.description}")
+            appendLine()
+            appendLine("**Coaching questions shown to the user:**")
+            appendLine(questions)
+            appendLine()
+            appendLine("**Conceptual hint (shown on request):** ${insight.conceptualHint}")
+            appendLine()
+            appendLine("---")
+            appendLine()
+            appendLine("## Rule Debug Info")
+            appendLine()
+
+            // ── Active coaching panel source ──────────────────────────────────
+            if (criticalMoment != null && s.guidedDiscoveryMode) {
+                appendLine("**Panel source:** Guided Discovery (CriticalMoment)")
+                appendLine("**CriticalMoment.type:** ${criticalMoment.type}")
+                appendLine("**CriticalMoment.severity:** ${criticalMoment.severity} cp")
+                appendLine("**CriticalMoment.explanationState:** ${criticalMoment.explanationState}")
+            } else if (s.activeProactiveTrigger != null) {
+                val t = s.activeProactiveTrigger
+                appendLine("**Panel source:** Proactive Coaching (CoachingTriggerEvaluator.kt)")
+                appendLine("**Trigger class:** CoachingTrigger.${t::class.simpleName}")
+                val props = when (t) {
+                    is CoachingTrigger.Safety           -> "kingSquare=${t.kingSquare}"
+                    is CoachingTrigger.CandidateMoves   -> "evalCp=${t.evalCp}"
+                    is CoachingTrigger.WorstPiece       -> "pieceSquare=${t.pieceSquare}, mobility=${t.mobility}"
+                    is CoachingTrigger.ForcingMove      -> "motif=${t.motif}"
+                    is CoachingTrigger.OpponentPlan     -> "evalGain=${t.evalGain}"
+                    is CoachingTrigger.PreMoveChecklist -> "hangingSquare=${t.hangingSquare}"
+                    is CoachingTrigger.RookActivation   -> "rookSquare=${t.rookSquare}, openFileIndex=${t.openFileIndex}"
+                    is CoachingTrigger.ImpulseControl   -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
+                    is CoachingTrigger.CandidateSearch  -> "evalCp=${t.evalCp}"
+                    is CoachingTrigger.CctCheck         -> "evalDelta=${t.evalDelta}"
+                }
+                appendLine("**Trigger properties:** $props")
+            }
+
+            // ── All triggers detected at this move ────────────────────────────
+            if (triggersHere.isNotEmpty()) {
+                appendLine()
+                appendLine("**All coaching triggers at move $idx:**")
+                triggersHere.forEach { t ->
+                    appendLine("  • ${t.typeName()} (CoachingTrigger.${t::class.simpleName})")
+                }
+            }
+
+            // ── GameHighlight rules that fired at this move ───────────────────
+            appendLine()
+            if (highlightsHere.isEmpty()) {
+                appendLine("**GameHighlight rules at move $idx:** none")
+            } else {
+                appendLine("**GameHighlight rules at move $idx:**")
+                highlightsHere.forEach { h ->
+                    val fileName = h.ruleType
+                        .split("_")
+                        .joinToString("") { it.replaceFirstChar { c -> c.uppercase() } }
+                        .let { "${it}Rule.kt" }
+                    appendLine()
+                    appendLine("  Rule file : $fileName")
+                    appendLine("  ruleType  : ${h.ruleType}")
+                    appendLine("  severity  : ${h.severity}")
+                    appendLine("  title     : ${h.title}")
+                    appendLine("  description: ${h.description}")
+                    appendLine("  tip       : ${h.improvementTip}")
+                }
+            }
+        }
     }
 
     /**
@@ -1684,7 +1934,13 @@ class AnalysisViewModel(
 
             // ── Settings ──────────────────────────────────────────────────────
             val positionCoachEnabled = settingsRepo.positionCoachEnabled.first()
-            _uiState.update { it.copy(positionCoachEnabled = positionCoachEnabled) }
+            val developerModeEnabled = settingsRepo.developerModeEnabled.first()
+            _uiState.update {
+                it.copy(
+                    positionCoachEnabled = positionCoachEnabled,
+                    developerModeEnabled = developerModeEnabled,
+                )
+            }
 
             // ── Board orientation — flip when the user played as Black ─────────
             val username = settingsRepo.username.first().trim()
@@ -1770,6 +2026,7 @@ class AnalysisViewModel(
                 )
             }
             applyMoveIndex(0)
+            _uiState.update { it.copy(showPredictionGate = true) }
             launchBackgroundAnalysis(storedMoments)
         }
     }
@@ -1874,6 +2131,13 @@ class AnalysisViewModel(
             )
         }
         Log.d(TAG, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")
+
+        // Trigger post-game debrief when user reaches the final position
+        val st = _uiState.value
+        if (index == uciMoves.size && st.isBackgroundAnalysisDone && !st.showPostGameDebrief) {
+            val result = buildDebrief(st.gamePrediction, st.criticalMoments)
+            _uiState.update { it.copy(showPostGameDebrief = true, predictionMatchResult = result) }
+        }
 
         // Keep engine-toggle overlays in sync when navigating in Analyse mode
         val updated = _uiState.value
@@ -1983,12 +2247,18 @@ class AnalysisViewModel(
                     fenSequence = fenSequence,
                     moveTimes   = moveTimes,
                 )
-                _uiState.update {
-                    it.copy(
+                _uiState.update { st ->
+                    val story       = buildGameStory(st.criticalMoments, uciMoves.size)
+                    val atEnd       = st.moveIndex == uciMoves.size && !st.showPostGameDebrief
+                    val matchResult = if (atEnd) buildDebrief(st.gamePrediction, st.criticalMoments) else st.predictionMatchResult
+                    st.copy(
                         isBackgroundAnalysisDone   = true,
                         backgroundAnalysisProgress = 1f,
                         gameHighlights             = highlights,
                         triggersByMove             = restoredTriggers,
+                        gameStory                  = story,
+                        showPostGameDebrief        = st.showPostGameDebrief || atEnd,
+                        predictionMatchResult      = matchResult,
                     )
                 }
                 // Check if the user already navigated past unreviewed critical moments
@@ -2084,12 +2354,19 @@ class AnalysisViewModel(
                 moveTimes   = moveTimes,
             )
 
-            _uiState.update {
-                it.copy(
+            val freshMoments = criticalMomentDao.getByGameId(gameId)
+            _uiState.update { st ->
+                val story       = buildGameStory(freshMoments, uciMoves.size)
+                val atEnd       = st.moveIndex == uciMoves.size && !st.showPostGameDebrief
+                val matchResult = if (atEnd) buildDebrief(st.gamePrediction, freshMoments) else st.predictionMatchResult
+                st.copy(
                     isBackgroundAnalysisDone   = true,
                     backgroundAnalysisProgress = 1f,
-                    criticalMoments            = criticalMomentDao.getByGameId(gameId),
+                    criticalMoments            = freshMoments,
                     gameHighlights             = highlights,
+                    gameStory                  = story,
+                    showPostGameDebrief        = st.showPostGameDebrief || atEnd,
+                    predictionMatchResult      = matchResult,
                 )
             }
             // Check if the user navigated past unreviewed critical positions while analysis ran
@@ -2409,6 +2686,111 @@ class AnalysisViewModel(
         val minors    = placement.count { it in "BbNn" }
         return queens == 0 && (rooks + minors) <= 4
     }
+
+    // ─── Game story & debrief helpers ─────────────────────────────────────────
+
+    private fun buildGameStory(moments: List<CriticalMoment>, totalHalfMoves: Int): String {
+        val userMoments = moments.filter {
+            it.type == CriticalMoment.Type.ENGINE_MARKED.name && isUserMove(it.moveIndex)
+        }
+        if (userMoments.isEmpty()) return "Solid game — the engine found no major errors."
+        val worst        = userMoments.maxByOrNull { it.severity }!!
+        val worstMoveNum = worst.moveIndex / 2 + 1
+        val phase = when {
+            worst.moveIndex < 20                          -> "the opening"
+            worst.moveIndex < totalHalfMoves * 2 / 3     -> "the middlegame"
+            else                                          -> "the endgame"
+        }
+        val topCatName = dominantCategory(userMoments)?.let { categoryLabel(it) }
+        return when (userMoments.size) {
+            1    -> "The game hinged on one moment — around move $worstMoveNum in $phase."
+            2    -> "Two errors shaped this game. Biggest shift: move $worstMoveNum in $phase."
+            else -> "${userMoments.size} errors detected. Biggest: move $worstMoveNum.${topCatName?.let { " Pattern: $it." } ?: ""}"
+        }
+    }
+
+    private fun buildDebrief(
+        prediction: GamePrediction?,
+        moments:    List<CriticalMoment>,
+    ): PredictionMatchResult {
+        val userMoments = moments.filter {
+            it.type == CriticalMoment.Type.ENGINE_MARKED.name && isUserMove(it.moveIndex)
+        }
+        if (prediction == null || prediction == GamePrediction.NOT_SURE) {
+            if (userMoments.isEmpty()) {
+                return PredictionMatchResult(isAccurate = true, headline = "Solid game — no major errors detected.")
+            }
+            val worst = userMoments.maxByOrNull { it.severity }!!
+            return PredictionMatchResult(
+                isAccurate = true,
+                headline   = dominantCategory(userMoments)?.let { "Main pattern: ${categoryLabel(it)}." }
+                             ?: "${userMoments.size} error(s) detected.",
+                detail     = "Biggest moment: move ${worst.moveIndex / 2 + 1}.",
+            )
+        }
+        return when (prediction) {
+            GamePrediction.SPECIFIC_BLUNDER -> {
+                val blunders = userMoments.filter { it.severity >= 150 }
+                if (blunders.isNotEmpty()) {
+                    val worst = blunders.maxByOrNull { it.severity }!!
+                    PredictionMatchResult(
+                        isAccurate = true,
+                        headline   = "Your read was right — blunder on move ${worst.moveIndex / 2 + 1}.",
+                        detail     = if (blunders.size > 1) "${blunders.size} blunders total (${worst.severity}cp worst)." else "${worst.severity}cp loss.",
+                    )
+                } else {
+                    PredictionMatchResult(
+                        isAccurate = false,
+                        headline   = "No clean blunder — errors were more subtle.",
+                        detail     = dominantCategory(userMoments)?.let { "Main pattern: ${categoryLabel(it)}." },
+                    )
+                }
+            }
+            GamePrediction.TIME_PRESSURE -> {
+                val timeMoments = userMoments.filter {
+                    it.reasonCategory == CriticalMoment.ReasonCategory.TIME_PRESSURE.name
+                }
+                if (timeMoments.isNotEmpty()) {
+                    PredictionMatchResult(
+                        isAccurate = true,
+                        headline   = "Confirmed — ${timeMoments.size} time-pressure mistake(s).",
+                    )
+                } else {
+                    PredictionMatchResult(
+                        isAccurate = false,
+                        headline   = "Time wasn't the main issue here.",
+                        detail     = dominantCategory(userMoments)?.let { "Main pattern: ${categoryLabel(it)}." },
+                    )
+                }
+            }
+            GamePrediction.OUTPLAYED_POSITIONALLY -> {
+                val positional = userMoments.filter {
+                    it.reasonCategory in listOf(
+                        CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name,
+                        CriticalMoment.ReasonCategory.OPENING_DEVIATION.name,
+                    )
+                }
+                if (positional.isNotEmpty()) {
+                    PredictionMatchResult(
+                        isAccurate = true,
+                        headline   = "Correct — ${positional.size} strategic error(s) detected.",
+                    )
+                } else {
+                    PredictionMatchResult(
+                        isAccurate = false,
+                        headline   = "The problem was more tactical than positional.",
+                        detail     = dominantCategory(userMoments)?.let { "Main pattern: ${categoryLabel(it)}." },
+                    )
+                }
+            }
+            GamePrediction.NOT_SURE -> error("handled above")
+        }
+    }
+
+    private fun dominantCategory(moments: List<CriticalMoment>): CriticalMoment.ReasonCategory? =
+        moments.groupBy { it.reasonCategory }
+            .maxByOrNull { it.value.size }?.key
+            ?.let { runCatching { CriticalMoment.ReasonCategory.valueOf(it) }.getOrNull() }
 }
 
 // ─── Extension helpers ────────────────────────────────────────────────────────

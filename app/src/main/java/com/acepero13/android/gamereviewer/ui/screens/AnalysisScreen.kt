@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -78,9 +79,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Log
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -96,6 +105,10 @@ import com.acepero13.android.gamereviewer.ui.components.OpeningDeviationPanel
 import com.acepero13.android.gamereviewer.ui.components.PositionCoachCard
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
 import com.acepero13.android.gamereviewer.ui.components.ProactiveCoachingPanel
+import com.acepero13.android.gamereviewer.ui.components.GameStoryCard
+import com.acepero13.android.gamereviewer.ui.components.PostGameDebrief
+import com.acepero13.android.gamereviewer.ui.components.PredictionGate
+import com.acepero13.android.gamereviewer.ui.components.DevCoachPromptSheet
 import com.acepero13.android.gamereviewer.ui.components.StatsSheet
 import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.components.EvalBar
@@ -150,9 +163,30 @@ fun AnalysisScreen(
             onInitialMoveConsumed()
         }
     }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState    = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val devSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope    = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val context  = LocalContext.current
+
+    var showDevSheet   by remember { mutableStateOf(false) }
+    var devPromptText  by remember { mutableStateOf("") }
+
+    if (showDevSheet && devPromptText.isNotBlank()) {
+        DevCoachPromptSheet(
+            dataSection = devPromptText,
+            sheetState  = devSheetState,
+            onCopy = { text ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Coach LLM Prompt", text))
+                scope.launch { snackbar.showSnackbar("Prompt copied to clipboard") }
+            },
+            onDismiss = {
+                showDevSheet = false
+                scope.launch { devSheetState.hide() }
+            },
+        )
+    }
 
     // ── Stats bottom-sheet ─────────────────────────────────────────────────────
     if (state.showStatsSheet) {
@@ -180,9 +214,33 @@ fun AnalysisScreen(
         )
     }
 
+    val devPanelActive = state.developerModeEnabled &&
+        (state.showProactiveCoaching || state.guidedDiscoveryMode)
+
     Scaffold(
         containerColor = WCDark,
         snackbarHost   = { SnackbarHost(snackbar) },
+        floatingActionButton = {
+            if (devPanelActive) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        val prompt = vm.buildCoachEvalPrompt()
+                        if (prompt != null) {
+                            devPromptText = prompt
+                            showDevSheet  = true
+                        }
+                    },
+                    containerColor = Color(0xFF1F3A2A),
+                    contentColor   = Color(0xFF4ADE80),
+                ) {
+                    Icon(
+                        imageVector        = Icons.Outlined.BugReport,
+                        contentDescription = "Copy LLM coach accuracy prompt",
+                        modifier           = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -356,6 +414,24 @@ fun AnalysisScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        // Game story headline — dismissable narrative summary
+                        GameStoryCard(
+                            story     = state.gameStory,
+                            visible   = !state.gameStoryDismissed,
+                            onDismiss = vm::dismissGameStory,
+                            modifier  = Modifier.fillMaxWidth(),
+                        )
+
+                        // Post-game debrief — prediction vs engine findings (shown at end of game)
+                        PostGameDebrief(
+                            visible      = state.showPostGameDebrief,
+                            prediction   = state.gamePrediction,
+                            matchResult  = state.predictionMatchResult,
+                            onDismiss    = vm::dismissPostGameDebrief,
+                            onViewReport = { onViewReport(gameId) },
+                            modifier     = Modifier.fillMaxWidth(),
+                        )
+
                         // Opening Theory Coach panel — shown at the exact deviation move
                         if (state.showOpeningDeviationPanel) {
                             state.openingDeviation?.let { deviation ->
@@ -395,7 +471,9 @@ fun AnalysisScreen(
                                     classification = classification,
                                     insights       = insights,
                                     onContinue     = vm::dismissMiddlegamePlanPanel,
-                                    modifier       = Modifier.fillMaxWidth(),
+                                    modifier       = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 320.dp),
                                 )
                             }
                         }
@@ -511,6 +589,16 @@ fun AnalysisScreen(
                     }
                 }
             }
+        // ── Pre-game prediction gate — overlays everything until dismissed ────────
+        PredictionGate(
+            visible     = state.showPredictionGate,
+            whitePlayer = state.game?.whitePlayer ?: "",
+            blackPlayer = state.game?.blackPlayer ?: "",
+            result      = state.game?.result ?: "*",
+            onSubmit    = vm::submitPrediction,
+            onSkip      = vm::skipPrediction,
+            modifier    = Modifier.fillMaxSize(),
+        )
         }
     }   // closes content Box
 }       // closes Scaffold content lambda

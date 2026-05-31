@@ -88,13 +88,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
     vm: SettingsViewModel = koinViewModel(),
 ) {
-    val appColors           = LocalAppColors.current
-    val boardTheme          by vm.boardTheme.collectAsState()
-    val pieceStyle          by vm.pieceStyle.collectAsState()
-    val themeMode           by vm.themeMode.collectAsState()
-    val clearDone           by vm.clearDone.collectAsState()
-    val savedUsername       by vm.username.collectAsState()
+    val appColors            = LocalAppColors.current
+    val boardTheme           by vm.boardTheme.collectAsState()
+    val pieceStyle           by vm.pieceStyle.collectAsState()
+    val themeMode            by vm.themeMode.collectAsState()
+    val clearDone            by vm.clearDone.collectAsState()
+    val savedUsername        by vm.username.collectAsState()
     val positionCoachEnabled by vm.positionCoachEnabled.collectAsState()
+    val developerModeEnabled by vm.developerModeEnabled.collectAsState()
     var usernameInput by remember(savedUsername) { mutableStateOf(savedUsername) }
 
     // Piece style search state
@@ -349,6 +350,38 @@ fun SettingsScreen(
                 Switch(
                     checked  = positionCoachEnabled,
                     onCheckedChange = vm::setPositionCoachEnabled,
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = appColors.border)
+            Spacer(Modifier.height(24.dp))
+
+            // ── Developer Options ─────────────────────────────────────────────
+            SectionHeader("Developer Options")
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Coach Accuracy Debug",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = appColors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Shows a \"Copy LLM Prompt\" button next to active coaching panels so you can paste the position context into an LLM to verify coaching accuracy.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = appColors.textSecondary,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked         = developerModeEnabled,
+                    onCheckedChange = vm::setDeveloperModeEnabled,
                 )
             }
 

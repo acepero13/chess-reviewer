@@ -39,6 +39,10 @@ class SettingsViewModel(
     val positionCoachEnabled = repo.positionCoachEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** When true, a "Copy LLM Prompt" button appears next to active coaching panels. */
+    val developerModeEnabled = repo.developerModeEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Tracks whether the clear-all operation has just completed (for snackbar feedback). */
     private val _clearDone = MutableStateFlow(false)
     val clearDone = _clearDone.asStateFlow()
@@ -48,6 +52,7 @@ class SettingsViewModel(
     fun setThemeMode(mode: String)             = viewModelScope.launch { repo.setThemeMode(mode) }
     fun setUsername(name: String)              = viewModelScope.launch { repo.setUsername(name) }
     fun setPositionCoachEnabled(on: Boolean)   = viewModelScope.launch { repo.setPositionCoachEnabled(on) }
+    fun setDeveloperModeEnabled(on: Boolean)   = viewModelScope.launch { repo.setDeveloperModeEnabled(on) }
 
     /**
      * Deletes all imported games and their associated analysis data:

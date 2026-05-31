@@ -34,7 +34,11 @@ object CoachingTriggerEvaluator {
     private const val MIDDLEGAME_END                 = 50  // half-move index
     private const val OPPONENT_PLAN_MIN_CP           = 30  // minimum gain to note opponent's plan
     private const val OPPONENT_PLAN_MAX_CP           = 120 // above this it's a user blunder (already flagged)
-    private const val KING_MIN_ADJACENT_DEFENDERS    = 1   // fewer than this = Safety trigger fires
+    private const val KING_MIN_ADJACENT_DEFENDERS    = 1   // fewer than this = Safety candidate
+    // Safety only fires when there is a genuine tactical reason, not merely structural exposure.
+    // If the evaluation drop is below this and no opponent piece directly attacks a king-adjacent
+    // square, the position is treated as structural — promote CandidateSearch instead.
+    private const val SAFETY_MIN_CP_DROP             = 50
     // In the opening phase, only fire PreMoveChecklist / ForcingMove when the
     // mover dropped ≥ this many centipawns — suppress intentional tension / gambits.
     private const val OPENING_TRIGGER_THRESHOLD_CP   = -75
@@ -43,6 +47,11 @@ object CoachingTriggerEvaluator {
     private const val CANDIDATE_SEARCH_MIN_CP        = 50  // |eval| lower bound for "rich with plans" zone
     private const val CANDIDATE_SEARCH_MAX_CP        = 300 // above this the position is near-decisive, not a plan choice
     private const val CCT_CHECK_EVAL_SHIFT_CP        = 100 // any shift ≥ 1.0 pawn triggers CCT habit reminder
+    // Rook Activation is a middlegame concept — suppress it entirely during the opening.
+    // Half-move 24 ≈ move 12 per side; requiring 2 developed minors guards against rooks
+    // that are still physically blocked by unmoved knights/bishops.
+    private const val ROOK_ACTIVATION_MIN_HALF_MOVE       = 24
+    private const val ROOK_ACTIVATION_MIN_DEVELOPED_MINORS = 2
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -78,7 +87,7 @@ object CoachingTriggerEvaluator {
 
             // ── 1. Safety ─────────────────────────────────────────────────────
             if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
-                detectSafety(board, eval.moveIndex, playerIsWhite)?.let { triggers.add(it) }
+                detectSafety(board, eval, playerIsWhite)?.let { triggers.add(it) }
             }
 
             // ── 2. Candidate Moves ────────────────────────────────────────────
@@ -115,7 +124,7 @@ object CoachingTriggerEvaluator {
             }
 
             // ── 7. Rook Activation ────────────────────────────────────────────
-            if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
+            if (board != null && eval.moveIndex in ROOK_ACTIVATION_MIN_HALF_MOVE..MIDDLEGAME_END) {
                 detectRookActivation(board, eval.moveIndex, isWhite)?.let { triggers.add(it) }
             }
 
@@ -162,22 +171,40 @@ object CoachingTriggerEvaluator {
 
     // ── Private: individual trigger detectors ──────────────────────────────────
 
-    private fun detectSafety(board: Board, moveIndex: Int, isWhite: Boolean): CoachingTrigger.Safety? {
-        // Always check the player's own king (isWhite = playerIsWhite, not the moving side)
-        val movingSide  = if (isWhite) Side.WHITE else Side.BLACK
-        val kingSquare  = BoardAttackHelper.kingSquare(board, movingSide) ?: return null
+    private fun detectSafety(board: Board, eval: GameEvaluation, isWhite: Boolean): CoachingTrigger.Safety? {
+        val movingSide   = if (isWhite) Side.WHITE else Side.BLACK
+        val opponentSide = if (isWhite) Side.BLACK else Side.WHITE
+        val kingSquare   = BoardAttackHelper.kingSquare(board, movingSide) ?: return null
 
         // Count friendly pieces in the 8 adjacent squares (including pawns)
-        val adjacent    = adjacentSquares(kingSquare)
+        val adjacent      = adjacentSquares(kingSquare)
         val defenderCount = adjacent.count { sq ->
             val p = board.getPiece(sq)
             p != Piece.NONE && p.pieceSide == movingSide && p.pieceType != PieceType.KING
         }
 
-        // Fire if king has fewer than threshold defenders around it
-        return if (defenderCount <= KING_MIN_ADJACENT_DEFENDERS) {
-            CoachingTrigger.Safety(moveIndex, kingSquare.name)
-        } else null
+        // Structural guard: king must already be short on defenders
+        if (defenderCount > KING_MIN_ADJACENT_DEFENDERS) return null
+
+        // Check for immediate tactical danger: opponent pieces attacking king-adjacent squares.
+        // Build a map of adjacent square → attacker count so we can name the focal point.
+        val attacksBySquare: Map<Square, Int> = adjacent.associateWith { sq ->
+            BoardAttackHelper.attackersOf(board, sq, opponentSide).size
+        }
+        val mostAttackedEntry = attacksBySquare.maxByOrNull { (_, cnt) -> cnt }
+        val hasDirectAttack   = (mostAttackedEntry?.value ?: 0) > 0
+
+        // Distinguish structural exposure from real tactical danger:
+        //   - Significant evaluation drop (≥ SAFETY_MIN_CP_DROP) → real consequence visible in engine
+        //   - Opponent piece directly attacking a king-adjacent square → immediate tactical threat
+        // Either condition alone justifies the coaching prompt; neither alone is structural.
+        val moverDelta       = if (isWhite) eval.evalDelta else -eval.evalDelta
+        val isSignificantDrop = moverDelta <= -SAFETY_MIN_CP_DROP
+
+        if (!isSignificantDrop && !hasDirectAttack) return null
+
+        val threatSquare = if (hasDirectAttack) mostAttackedEntry?.key?.name else null
+        return CoachingTrigger.Safety(eval.moveIndex, kingSquare.name, threatSquare)
     }
 
     private fun detectCandidate(eval: GameEvaluation, isWhite: Boolean): CoachingTrigger.CandidateMoves? {
@@ -266,6 +293,13 @@ object CoachingTriggerEvaluator {
 
         for ((rookSq, _) in rooks) {
             val rookFile = BoardAttackHelper.fileOf(rookSq)
+            val rookRank = BoardAttackHelper.rankOf(rookSq)
+
+            // Rooks still on their back-rank corner squares are physically blocked by
+            // undeveloped minor pieces. Don't nag the user until those pieces have moved.
+            val homeRank = if (side == Side.WHITE) 0 else 7
+            val isOnStartSquare = rookRank == homeRank && (rookFile == 0 || rookFile == 7)
+            if (isOnStartSquare && countDevelopedMinors(board, side) < ROOK_ACTIVATION_MIN_DEVELOPED_MINORS) continue
 
             // Closed file = any pawn (either color) on the rook's file
             val rookFileHasPawn = (0..7).any { rank ->
@@ -296,6 +330,29 @@ object CoachingTriggerEvaluator {
             }
         }
         return null
+    }
+
+    /**
+     * Counts how many of [side]'s minor pieces (knights and bishops) have left their
+     * starting squares. A piece is considered "developed" when its home square is no
+     * longer occupied by the expected piece (captured pieces also count as vacated).
+     */
+    private fun countDevelopedMinors(board: Board, side: Side): Int {
+        val homeSquaresToPiece = if (side == Side.WHITE)
+            listOf(
+                Square.B1 to com.github.bhlangonijr.chesslib.Piece.WHITE_KNIGHT,
+                Square.G1 to com.github.bhlangonijr.chesslib.Piece.WHITE_KNIGHT,
+                Square.C1 to com.github.bhlangonijr.chesslib.Piece.WHITE_BISHOP,
+                Square.F1 to com.github.bhlangonijr.chesslib.Piece.WHITE_BISHOP,
+            )
+        else
+            listOf(
+                Square.B8 to com.github.bhlangonijr.chesslib.Piece.BLACK_KNIGHT,
+                Square.G8 to com.github.bhlangonijr.chesslib.Piece.BLACK_KNIGHT,
+                Square.C8 to com.github.bhlangonijr.chesslib.Piece.BLACK_BISHOP,
+                Square.F8 to com.github.bhlangonijr.chesslib.Piece.BLACK_BISHOP,
+            )
+        return homeSquaresToPiece.count { (sq, expectedPiece) -> board.getPiece(sq) != expectedPiece }
     }
 
     private fun detectImpulseControl(
