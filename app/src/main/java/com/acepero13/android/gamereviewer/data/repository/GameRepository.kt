@@ -22,4 +22,12 @@ class GameRepository(private val dao: ReviewGameDao) {
 
     suspend fun isDuplicate(sourceType: String, sourceId: String): Boolean =
         dao.findBySourceId(sourceType, sourceId) != null
+
+    /** Returns the existing game if already imported, or null if this is a new game. */
+    suspend fun findDuplicate(sourceType: String, sourceId: String): ReviewGame? =
+        dao.findBySourceId(sourceType, sourceId)
+
+    suspend fun getRecentGames(since: Long): List<ReviewGame> = dao.getRecentGames(since)
+
+    fun countRecentGames(since: Long): Flow<Int> = dao.countRecentGames(since)
 }

@@ -17,4 +17,8 @@ interface MoveTimeDao {
 
     @Query("SELECT COUNT(*) FROM move_times WHERE gameId = :gameId")
     suspend fun countByGameId(gameId: Long): Int
+
+    /** Wipe all move-time records. Used by the "Clear all data" Settings action. */
+    @Query("DELETE FROM move_times")
+    suspend fun deleteAll()
 }

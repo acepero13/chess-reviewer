@@ -9,6 +9,9 @@ feedback. The app supports PGN imports from Chess.com and Lichess using `chess-c
 simulates a human coach by noticing blind spots in real time via an **Insight Reconciliation System
 **.
 
+**IMPORTANT**: Every time you make a change in chess-core, you need to run a publishMaven task,
+otherwise, changes are not seen by the game reviwer app
+
 ---
 
 ## 🛠️ Tech Stack & Library Conventions

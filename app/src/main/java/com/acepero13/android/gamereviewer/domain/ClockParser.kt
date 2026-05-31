@@ -11,8 +11,14 @@ package com.acepero13.android.gamereviewer.domain
  */
 object ClockParser {
 
-    /** Matches `[%clk H:MM:SS]` or `[%clk H:MM:SS.d]`. */
-    private val CLOCK_REGEX = Regex("""\[%clk\s+(\d+):(\d{1,2}):(\d{1,2}(?:\.\d+)?)\]""")
+    /**
+     * Matches clock annotations in these formats (all used in the wild):
+     *  - `[%clk H:MM:SS]`    — Chess.com / Lichess standard
+     *  - `[%clk H:MM:SS.d]`  — Lichess sub-second
+     *  - `[%clk MM:SS]`      — some third-party PGN exporters
+     *  - `[%clk MM:SS.d]`    — same with fraction
+     */
+    private val CLOCK_REGEX = Regex("""\[%clk\s+(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)\]""")
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -24,8 +30,11 @@ object ClockParser {
      */
     fun parseMoveClocks(movesPgn: String): List<Int> =
         CLOCK_REGEX.findAll(movesPgn).map { m ->
-            val (h, min, sec) = m.destructured
-            h.toInt() * 3600 + min.toInt() * 60 + sec.toFloat().toInt()
+            val hStr  = m.groupValues[1]  // optional hours (empty string when absent)
+            val min   = m.groupValues[2].toInt()
+            val sec   = m.groupValues[3].toFloat().toInt()
+            val hours = if (hStr.isNotEmpty()) hStr.toInt() else 0
+            hours * 3600 + min * 60 + sec
         }.toList()
 
     /**

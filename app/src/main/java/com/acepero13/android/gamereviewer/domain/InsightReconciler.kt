@@ -148,6 +148,169 @@ object InsightReconciler {
         )
     }
 
+    // ── By coaching trigger (Proactive Board Scan) ────────────────────────────
+
+    /**
+     * Returns a lightweight coaching [Insight] for a proactive [CoachingTrigger].
+     *
+     * Unlike [forReason] (mistake-based), these insights are never tied to a blunder.
+     * They encourage the user to scan the board habitually — the "Board Scan" habit.
+     */
+    fun forTrigger(trigger: CoachingTrigger): Insight = when (trigger) {
+
+        is CoachingTrigger.Safety -> Insight(
+            emoji       = "♔",
+            title       = "King Safety Check",
+            description = "Your King has few pieces guarding the surrounding squares. " +
+                "Strong players check King safety after every move — theirs and the opponent's.",
+            questions   = listOf(
+                "You just moved a piece away from your King. Can you see any immediate threats to your King's safety?",
+                "Are there any open files or diagonals that could be used to attack your King?",
+                "Does your opponent have any pieces that could quickly join an attack?",
+            ),
+            conceptualHint = "King safety is non-negotiable. Count the pawns still shielding your King. " +
+                "If your King has fewer than two friendly pieces nearby, consider reinforcing before pursuing other plans.",
+        )
+
+        is CoachingTrigger.CandidateMoves -> Insight(
+            emoji       = "⚖️",
+            title       = "Choose Your Plan",
+            description = "The position is balanced — no forcing moves, no clear advantage. " +
+                "This is a decision point that tests strategic understanding, not calculation.",
+            questions   = listOf(
+                "This is a balanced position. Instead of finding the 'best' move, can you identify two different plans here?",
+                "Which of your pieces is least active — and how could you improve it?",
+                "What is your opponent's most ambitious plan, and how would you stop it?",
+            ),
+            conceptualHint = "In balanced positions, ask Silman's question: 'What are the imbalances?' " +
+                "Look at pawn structure, piece activity, open files, and key squares. " +
+                "The player with the clearer plan usually wins these positions.",
+        )
+
+        is CoachingTrigger.WorstPiece -> Insight(
+            emoji       = "♟",
+            title       = "Worst Piece Scan",
+            description = "One of your pieces has very limited mobility — it is your 'worst piece.' " +
+                "Improving your worst piece is almost always the right strategic plan.",
+            questions   = listOf(
+                "Your pieces are fighting for space. Can you point to your most underdeveloped or restricted piece?",
+                "Why is that piece restricted — is it blocked by its own pawns or controlled by the opponent?",
+                "What one move would improve that piece's scope the most?",
+            ),
+            conceptualHint = "Jeremy Silman's key rule: always improve your worst piece first. " +
+                "Ask 'Which of my pieces would be embarrassed to show its face at a chess club?' " +
+                "Then find a plan to reroute or free it.",
+        )
+
+        is CoachingTrigger.ForcingMove -> Insight(
+            emoji       = "⚔️",
+            title       = "Forcing Moves First",
+            description = "The engine found a forcing sequence here. Strong players always scan " +
+                "for checks, captures, and threats before choosing a quiet move.",
+            questions   = listOf(
+                "Always check for forcing moves first. Are there any checks, captures, or threats in this position?",
+                "Can you find a move that wins material by force — not by hope?",
+                "Is there a sequence that starts with a check or capture and leads to a clear advantage?",
+            ),
+            conceptualHint = "Use the CCT rule before every move: Check, Capture, Threat. " +
+                "If any exist, they are your candidate moves. Only consider quiet moves after verifying " +
+                "there are no forcing sequences available.",
+        )
+
+        is CoachingTrigger.OpponentPlan -> Insight(
+            emoji       = "🔭",
+            title       = "Opponent's Intent",
+            description = "That move improved the opponent's position. Before responding, " +
+                "top players always pause to understand the opponent's idea.",
+            questions   = listOf(
+                "Stop. What is the strategic idea behind that last move?",
+                "Did the opponent create a threat, improve a piece, or open a line — which was the priority?",
+                "How does your response address their plan rather than just pursuing your own?",
+            ),
+            conceptualHint = "After every opponent move, ask: 'Why did they play that?' " +
+                "Prophylaxis — anticipating and preventing the opponent's threats — is a hallmark " +
+                "of advanced play. A move that stops their plan AND improves your position is ideal.",
+        )
+
+        is CoachingTrigger.PreMoveChecklist -> Insight(
+            emoji       = "✅",
+            title       = "Pre-Move Checklist",
+            description = "There is at least one undefended piece on the board. " +
+                "Strong players run a quick safety check before every single move.",
+            questions   = listOf(
+                "Before you move: are there any loose pieces on the board — yours or the opponent's?",
+                "Does your opponent have an immediate threat you must address first?",
+                "After your planned move, will any of your pieces become undefended?",
+            ),
+            conceptualHint = "Use the LPDO rule (Loose Pieces Drop Off) before every move. " +
+                "Scan all pieces for attackers vs. defenders. If attackers > defenders, " +
+                "that piece is hanging. This single habit eliminates the majority of tactical losses.",
+        )
+
+        is CoachingTrigger.RookActivation -> Insight(
+            emoji       = "♜",
+            title       = "Activate Your Rook",
+            description = "Your rook is stuck on a closed file while better options exist. " +
+                "A rook on a closed file contributes almost nothing to the position.",
+            questions   = listOf(
+                "Your rook is on a closed file. Can you find an open or half-open file where it would be far more powerful?",
+                "Which file is most likely to open up in the next few moves — and can you place your rook there now?",
+                "Is there a way to double rooks on an open file, or place a rook behind a passed pawn?",
+            ),
+            conceptualHint = "Rooks belong on open files, behind passed pawns, or on the 7th rank. " +
+                "The rule: 'Put your rook where the action is — or where the action will be.' " +
+                "Even moving a rook one file to a half-open file can dramatically improve its activity.",
+        )
+
+        is CoachingTrigger.ImpulseControl -> Insight(
+            emoji       = "⚡",
+            title       = "Impulse Control Check",
+            description = "You played that move in under ${trigger.timeSpentSeconds} seconds. " +
+                "In complex positions, intuition must be verified before being trusted.",
+            questions   = listOf(
+                "What was the first candidate move you saw, and why did you stop looking after that?",
+                "Did you consider at least two different plans before deciding on this move?",
+                "What is your opponent's best reply to this move — did you check it before playing?",
+            ),
+            conceptualHint = "Fast moves in complex positions usually indicate 'hand chess' — " +
+                "the hand moves before the mind has finished calculating. " +
+                "The rule: if a position demands calculation, spend at least 30 seconds. " +
+                "Ask yourself: 'Am I playing the first move I saw, or the best move I found?'",
+        )
+
+        is CoachingTrigger.CandidateSearch -> Insight(
+            emoji       = "🔍",
+            title       = "Candidate Search",
+            description = "This position is rich with possibilities — multiple plans exist with " +
+                "very different tactical and strategic consequences.",
+            questions   = listOf(
+                "Can you find two different plans — one more aggressive, one more solid — and name them?",
+                "Why is Plan A better than Plan B in this specific pawn structure and piece placement?",
+                "What is your opponent's position trying to do — and which of your plans prevents it best?",
+            ),
+            conceptualHint = "In complex positions, the question is not 'What is the best move?' " +
+                "but 'Which plan is best?' Compare concrete variations: " +
+                "Plan A may win a pawn but open your king; Plan B may be slower but safer. " +
+                "Articulating why one plan beats another is the core skill of positional chess.",
+        )
+
+        is CoachingTrigger.CctCheck -> Insight(
+            emoji       = "✔️",
+            title       = "CCT Self-Check",
+            description = "This move caused a significant position change. " +
+                "Before seeing the engine's verdict, scan what your opponent can play.",
+            questions   = listOf(
+                "After your move, can your opponent play any immediate Checks — are they all safe?",
+                "After your move, can your opponent make any profitable Captures?",
+                "After your move, does your opponent have a strong Threat you have not addressed?",
+            ),
+            conceptualHint = "The CCT rule (Checks, Captures, Threats) is the most important habit " +
+                "in chess. After every move — yours or the opponent's — scan for the three forcing " +
+                "move types. Most tactical losses occur not because a player cannot calculate, " +
+                "but because they forgot to look.",
+        )
+    }
+
     // ── By motif (Blunder Guard reflection) ───────────────────────────────────
 
     /**

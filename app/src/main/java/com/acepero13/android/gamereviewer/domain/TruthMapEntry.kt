@@ -38,6 +38,19 @@ data class TruthMapEntry(
 
     /**
      * True when a tactical motif is present (excluding generic "mixed").
+     *
+     * NOTE: this is purely "any motif exists" and makes no claim about significance.
+     * Use [isSignificantTacticalMiss] for critical-moment detection.
      */
     val hasTacticalMotif: Boolean get() = motif != "mixed"
+
+    /**
+     * True when a meaningful tactical motif is paired with a real eval drop (≥ 100 cp).
+     *
+     * Prevents the mentor from firing on incidental motif labels (e.g. "undefended material"
+     * classified on a move where the evaluation only shifted 0.5–0.8 pawns and the piece
+     * was never actually in danger). 100 cp is the value of a pawn — below that threshold
+     * a tactical label is almost always noise from the classifier.
+     */
+    val isSignificantTacticalMiss: Boolean get() = motif != "mixed" && playerEvalDelta <= -100
 }

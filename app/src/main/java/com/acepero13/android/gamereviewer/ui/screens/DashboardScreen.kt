@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.BehavioralProfileCard
+import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.WCDark
 import org.koin.androidx.compose.koinViewModel
@@ -50,8 +51,9 @@ import org.koin.androidx.compose.koinViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    onBack: () -> Unit,
-    vm: DashboardViewModel = koinViewModel(),
+    onBack:       () -> Unit,
+    onStartDrill: ((categoryNames: String, drillTitle: String) -> Unit)? = null,
+    vm:           DashboardViewModel = koinViewModel(),
 ) {
     val state by vm.uiState.collectAsState()
 
@@ -126,6 +128,14 @@ fun DashboardScreen(
                 }
             }
 
+            // ── Board Scan habit progress ─────────────────────────────────────
+            if (state.habitRows.isNotEmpty()) {
+                HabitProgressCard(
+                    rows     = state.habitRows,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             // ── Failure trends ────────────────────────────────────────────────
             if (state.trends.isNotEmpty()) {
                 Text(
@@ -136,8 +146,12 @@ fun DashboardScreen(
                 )
                 state.trends.forEach { trend ->
                     BehavioralProfileCard(
-                        trend    = trend,
-                        modifier = Modifier.fillMaxWidth(),
+                        trend        = trend,
+                        modifier     = Modifier.fillMaxWidth(),
+                        onStartDrill = onStartDrill?.let { callback -> {
+                            val cats = trend.triggerCategories.joinToString(",") { it.name }
+                            callback(cats, "${trend.emoji} ${trend.title}")
+                        }},
                     )
                 }
             } else if (state.gamesAnalyzed > 0) {

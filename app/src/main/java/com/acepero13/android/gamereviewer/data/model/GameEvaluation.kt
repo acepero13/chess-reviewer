@@ -26,4 +26,7 @@ data class GameEvaluation(
     val evalCp: Int,             // centipawns from White's perspective (+= White better)
     val evalDelta: Int = 0,      // swing vs. previous position (negative = mover lost eval)
     val motif: String = "mixed", // MotifClassifier label: checkmate/fork/hanging/mixed
+    /** Comma-separated [CoachingTrigger] type names detected at this position, e.g. "SAFETY,WORST_PIECE".
+     *  Empty string when no triggers fire or when the game predates trigger detection (DB v4+). */
+    val coachingTriggers: String = "",
 )

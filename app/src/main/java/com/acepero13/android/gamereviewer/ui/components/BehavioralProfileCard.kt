@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,8 +40,9 @@ import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
  */
 @Composable
 fun BehavioralProfileCard(
-    trend: BehavioralDiagnostic.FailureTrend,
-    modifier: Modifier = Modifier,
+    trend:        BehavioralDiagnostic.FailureTrend,
+    modifier:     Modifier = Modifier,
+    onStartDrill: (() -> Unit)? = null,
 ) {
     val rankColor = when (trend.rank) {
         1 -> Color(0xFFFFD700)  // gold
@@ -116,6 +119,22 @@ fun BehavioralProfileCard(
                         color    = rankColor,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
+                }
+
+                if (onStartDrill != null) {
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = onStartDrill,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = rankColor),
+                        border   = androidx.compose.foundation.BorderStroke(1.dp, rankColor.copy(alpha = 0.5f)),
+                    ) {
+                        Text(
+                            "Drill this pattern →",
+                            style      = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }

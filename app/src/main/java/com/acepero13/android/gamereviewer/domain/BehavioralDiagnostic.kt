@@ -36,6 +36,7 @@ object BehavioralDiagnostic {
         val description: String,
         val frequency: Int,    // distinct-game count
         val totalCount: Int,   // raw occurrence count
+        val triggerCategories: Set<CriticalMoment.ReasonCategory> = emptySet(),
     )
 
     // ── Archetype definitions ────────────────────────────────────────────────
@@ -172,12 +173,13 @@ object BehavioralDiagnostic {
             .take(topN)
             .mapIndexed { rankIdx, (arch, rec) ->
                 FailureTrend(
-                    rank        = rankIdx + 1,
-                    emoji       = arch.emoji,
-                    title       = arch.title,
-                    description = arch.description,
-                    frequency   = rec.gameIds.size,
-                    totalCount  = rec.totalCount,
+                    rank              = rankIdx + 1,
+                    emoji             = arch.emoji,
+                    title             = arch.title,
+                    description       = arch.description,
+                    frequency         = rec.gameIds.size,
+                    totalCount        = rec.totalCount,
+                    triggerCategories = arch.triggers,
                 )
             }
     }

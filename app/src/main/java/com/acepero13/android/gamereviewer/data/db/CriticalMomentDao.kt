@@ -40,4 +40,8 @@ interface CriticalMomentDao {
     /** Number of distinct games that have at least one ENGINE_MARKED moment. */
     @Query("SELECT COUNT(DISTINCT gameId) FROM critical_moments WHERE type = 'ENGINE_MARKED'")
     suspend fun countGamesAnalyzed(): Int
+
+    /** Wipe all critical moments. Used by the "Clear all data" Settings action. */
+    @Query("DELETE FROM critical_moments")
+    suspend fun deleteAll()
 }

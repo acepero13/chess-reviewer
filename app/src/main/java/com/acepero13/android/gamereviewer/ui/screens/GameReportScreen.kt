@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.DecisionVelocityChart
 import com.acepero13.chess.core.ui.theme.ChessGold
@@ -51,6 +53,7 @@ import org.koin.core.parameter.parametersOf
 fun GameReportScreen(
     gameId: Long,
     onBack: () -> Unit,
+    onNavigateToMove: (moveIndex: Int) -> Unit = {},
     vm: GameReportViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state by vm.uiState.collectAsState()
@@ -117,8 +120,9 @@ fun GameReportScreen(
             // ── Decision Velocity chart ────────────────────────────────────────
             if (state.hasTimeData) {
                 DecisionVelocityChart(
-                    decisions = state.decisions,
-                    modifier  = Modifier.fillMaxWidth(),
+                    decisions    = state.decisions,
+                    modifier     = Modifier.fillMaxWidth(),
+                    onMoveClick  = onNavigateToMove,
                 )
             } else {
                 Card(
@@ -169,28 +173,53 @@ private fun StatsSectionCard(state: GameReportUiState) {
                 color      = ChessGold,
             )
 
+            // 2-column grid — each cell gets equal width so labels never overlap
             Row(
                 modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                StatCell(label = "Total moves",     value = "${state.totalMoves}")
-                StatCell(label = "Blunders",        value = "${state.blunderCount}")
-                StatCell(label = "Rushed blunders", value = "${state.rushedBlunders}")
+                StatCell(
+                    modifier = Modifier.weight(1f),
+                    label    = "Total moves",
+                    value    = "${state.totalMoves}",
+                )
+                StatCell(
+                    modifier = Modifier.weight(1f),
+                    label    = "Blunders",
+                    value    = "${state.blunderCount}",
+                )
             }
 
             Row(
                 modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatCell(
-                    label = "Avg time on blunders",
-                    value = "${"%.1f".format(state.avgTimeOnBlunders)}s",
+                    modifier = Modifier.weight(1f),
+                    label    = "Rushed blunders",
+                    value    = "${state.rushedBlunders}",
                 )
                 StatCell(
-                    label = "Avg time on good moves",
-                    value = "${"%.1f".format(state.avgTimeOnGoodMoves)}s",
+                    modifier = Modifier.weight(1f),
+                    label    = "Careful blunders",
+                    value    = "${state.carefulBlunders}",
                 )
-                StatCell(label = "Careful blunders", value = "${state.carefulBlunders}")
+            }
+
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatCell(
+                    modifier = Modifier.weight(1f),
+                    label    = "Avg time on blunders",
+                    value    = "${"%.1f".format(state.avgTimeOnBlunders)}s",
+                )
+                StatCell(
+                    modifier = Modifier.weight(1f),
+                    label    = "Avg time on good moves",
+                    value    = "${"%.1f".format(state.avgTimeOnGoodMoves)}s",
+                )
             }
 
             // Coaching insight
@@ -227,18 +256,30 @@ private fun EvalOnlySummaryCard(evaluations: List<com.acepero13.android.gamerevi
 }
 
 @Composable
-private fun StatCell(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun StatCell(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier              = modifier,
+        horizontalAlignment   = Alignment.CenterHorizontally,
+        verticalArrangement   = Arrangement.spacedBy(2.dp),
+    ) {
         Text(
             text       = value,
             style      = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color      = ChessGold,
+            textAlign  = TextAlign.Center,
         )
         Text(
-            text  = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text      = label,
+            style     = MaterialTheme.typography.labelSmall,
+            color     = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            maxLines  = 2,
+            overflow  = TextOverflow.Ellipsis,
         )
     }
 }

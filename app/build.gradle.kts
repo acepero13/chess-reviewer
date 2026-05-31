@@ -86,6 +86,10 @@ dependencies {
     // Settings
     implementation(libs.datastore.preferences)
 
+    // Coil — SVG piece images in settings picker
+    implementation(libs.coil.compose)
+    implementation(libs.coil.svg)
+
     // Serialization
     implementation(libs.gson)
 

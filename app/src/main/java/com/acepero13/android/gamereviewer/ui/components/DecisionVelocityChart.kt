@@ -2,6 +2,7 @@ package com.acepero13.android.gamereviewer.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -39,30 +42,24 @@ import com.acepero13.android.gamereviewer.domain.TimeAnalyzer
  * Two overlaid visualisations on a single scrollable canvas:
  *
  * **Area chart** (white translucent):
- *   Eval delta per half-move (centipawn loss, clamped to 600 cp) plotted on the Y-axis.
- *   The area is shaded below the line; big spikes = bad moves.
+ *   Eval delta per half-move (centipawn loss, clamped to 600 cp) on Y-axis.
+ *   Big spikes = bad moves.
  *
  * **Time dots**:
- *   Each half-move is marked with a circle whose colour encodes [TimeAnalyzer.DecisionType]:
- *   - Red    → RUSHED_BLUNDER
- *   - Orange → RUSHED_OK
- *   - Purple → CAREFUL_BLUNDER
- *   - Teal   → CAREFUL_OK
- *   - Grey   → NORMAL
- *
- * Critical moments (blunders) additionally receive a ring marker around the dot.
+ *   Each half-move is a circle whose colour encodes [TimeAnalyzer.DecisionType].
  */
 @Composable
 fun DecisionVelocityChart(
     decisions: List<TimeAnalyzer.MoveDecision>,
     modifier: Modifier = Modifier,
-    chartHeight: Dp = 180.dp,
+    chartHeight: Dp = 200.dp,
+    onMoveClick: ((moveIndex: Int) -> Unit)? = null,
 ) {
     if (decisions.isEmpty()) {
         Text(
-            text     = "No time data available for this game.",
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            text  = "No time data available for this game.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = modifier.padding(8.dp),
         )
         return
@@ -75,12 +72,21 @@ fun DecisionVelocityChart(
             text     = "Decision Velocity",
             style    = MaterialTheme.typography.labelMedium,
             color    = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier.padding(bottom = 2.dp),
+        )
+        Text(
+            text     = "Y-axis: centipawn loss per move (higher = worse). Dot colour shows time vs. quality.",
+            style    = MaterialTheme.typography.labelSmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp),
         )
 
-        // Scrollable canvas — each move gets a fixed column width
         val colWidth   = 28.dp
-        val totalWidth = colWidth * decisions.size + 24.dp   // + leading pad
+        val totalWidth = colWidth * decisions.size + 52.dp  // + left axis area
+
+        val density     = LocalDensity.current
+        val colWidthPx  = with(density) { colWidth.toPx() }
+        val padLeftPx   = with(density) { 44.dp.toPx() }
 
         Box(
             modifier = Modifier
@@ -92,14 +98,68 @@ fun DecisionVelocityChart(
             Canvas(
                 modifier = Modifier
                     .width(totalWidth)
-                    .height(chartHeight),
+                    .height(chartHeight)
+                    .then(
+                        if (onMoveClick != null) Modifier.pointerInput(decisions) {
+                            detectTapGestures { offset ->
+                                val closestIdx = decisions.indices.minByOrNull { i ->
+                                    val nodeX = padLeftPx + i * colWidthPx + colWidthPx / 2f
+                                    kotlin.math.abs(offset.x - nodeX)
+                                }
+                                if (closestIdx != null) {
+                                    val nodeX = padLeftPx + closestIdx * colWidthPx + colWidthPx / 2f
+                                    if (kotlin.math.abs(offset.x - nodeX) <= colWidthPx) {
+                                        onMoveClick(decisions[closestIdx].moveIndex)
+                                    }
+                                }
+                            }
+                        } else Modifier
+                    ),
             ) {
-                val padLeft   = 20.dp.toPx()
+                val padLeft   = 44.dp.toPx()   // wider to fit Y-axis labels
                 val padTop    = 12.dp.toPx()
                 val padBottom = 28.dp.toPx()
                 val drawH     = size.height - padTop - padBottom
                 val colW      = colWidth.toPx()
                 val maxCp     = 600f
+
+                // ── Y-axis grid lines at 0, 200, 400, 600 cp ────────────────
+                val gridLevels = listOf(0f, 200f, 400f, 600f)
+                val gridLabels = listOf("0", "200", "400", "600+")
+
+                gridLevels.forEachIndexed { idx, cp ->
+                    val fraction = cp / maxCp
+                    val y = padTop + drawH - fraction * drawH
+
+                    // faint horizontal rule
+                    drawLine(
+                        color       = Color.White.copy(alpha = if (cp == 0f) 0.20f else 0.08f),
+                        start       = Offset(padLeft, y),
+                        end         = Offset(size.width, y),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+
+                    // Y-axis label
+                    val label    = gridLabels[idx]
+                    val measured = textMeasurer.measure(label, TextStyle(fontSize = 8.sp))
+                    drawText(
+                        textLayoutResult = measured,
+                        topLeft = Offset(
+                            x = padLeft - measured.size.width - 4.dp.toPx(),
+                            y = y - measured.size.height / 2f,
+                        ),
+                        color = Color.White.copy(alpha = 0.55f),
+                    )
+                }
+
+                // ── Y-axis title drawn vertically ────────────────────────────
+                // We approximate this by drawing "cp" at the top-left corner
+                val axisTitleMeasured = textMeasurer.measure("cp", TextStyle(fontSize = 7.sp))
+                drawText(
+                    textLayoutResult = axisTitleMeasured,
+                    topLeft = Offset(x = 2.dp.toPx(), y = padTop),
+                    color   = Color.White.copy(alpha = 0.4f),
+                )
 
                 // ── Eval area fill ───────────────────────────────────────────
                 val evalPath = Path()
@@ -151,7 +211,7 @@ fun DecisionVelocityChart(
                         )
                     }
 
-                    // Move-number label (White moves only = even index)
+                    // Move-number label on white moves only (even half-move index)
                     if (i % 2 == 0) {
                         val label    = "${i / 2 + 1}."
                         val measured = textMeasurer.measure(label, TextStyle(fontSize = 8.sp))
@@ -165,20 +225,20 @@ fun DecisionVelocityChart(
                         )
                     }
                 }
-
-                // ── Baseline ─────────────────────────────────────────────────
-                drawLine(
-                    color       = Color.White.copy(alpha = 0.15f),
-                    start       = Offset(padLeft, padTop + drawH),
-                    end         = Offset(size.width, padTop + drawH),
-                    strokeWidth = 1.dp.toPx(),
-                )
             }
         }
 
         // ── Legend ────────────────────────────────────────────────────────
         Spacer(Modifier.height(8.dp))
         ChartLegend()
+        if (onMoveClick != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = "Tap a dot to open that position",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+        }
     }
 }
 
@@ -193,20 +253,25 @@ private fun ChartLegend() {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             LegendItem(color = decisionColor(TimeAnalyzer.DecisionType.CAREFUL_OK), label = "Careful & ok")
             LegendItem(color = decisionColor(TimeAnalyzer.DecisionType.NORMAL),     label = "Normal")
+            LegendItem(color = Color.Red.copy(alpha = 0.5f), label = "Blunder ring", isRing = true)
         }
     }
 }
 
 @Composable
-private fun LegendItem(color: Color, label: String) {
+private fun LegendItem(color: Color, label: String, isRing: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Canvas(
             modifier = Modifier
-                .width(10.dp)
-                .height(10.dp)
-                .padding(end = 4.dp),
+                .width(12.dp)
+                .height(12.dp),
         ) {
-            drawCircle(color = color, radius = size.minDimension / 2f)
+            val r = size.minDimension / 2f
+            if (isRing) {
+                drawCircle(color = color, radius = r, style = Stroke(width = 1.5.dp.toPx()))
+            } else {
+                drawCircle(color = color, radius = r)
+            }
         }
         Spacer(Modifier.width(4.dp))
         Text(

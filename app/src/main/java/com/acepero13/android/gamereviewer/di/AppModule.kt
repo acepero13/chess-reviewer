@@ -3,6 +3,9 @@ package com.acepero13.android.gamereviewer.di
 import androidx.room.Room
 import com.acepero13.android.gamereviewer.data.db.AppDatabase
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
+import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
+import com.acepero13.android.gamereviewer.domain.OpeningDeviationAnalyzer
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.ui.screens.AnalysisViewModel
 import com.acepero13.android.gamereviewer.ui.screens.DashboardViewModel
@@ -10,6 +13,9 @@ import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameReportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.HomeViewModel
 import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
+import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
+import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
+import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillViewModel
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
 import com.acepero13.chess.core.pgn.PgnImporter
@@ -27,8 +33,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            // Development convenience: discard data on schema upgrades rather than
-            // writing explicit migrations (switch to addMigrations() before release).
+            .addMigrations(AppDatabase.MIGRATION_3_4)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -40,6 +45,8 @@ val appModule = module {
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
+    single { SettingsRepository(androidContext()) }
+    single { TriggerMasteryRepository(androidContext()) }
 
     // ── Chess-core singletons ─────────────────────────────────────────────────
     single { (androidApplication() as com.acepero13.android.gamereviewer.GameReviewerApp).stockfishEngine }
@@ -48,6 +55,7 @@ val appModule = module {
 
     // ── Domain layer ──────────────────────────────────────────────────────────
     single { TruthMapBuilder(get()) }
+    single { OpeningDeviationAnalyzer(get()) }
 
     // ── ViewModels ────────────────────────────────────────────────────────────
     viewModel { HomeViewModel(get()) }
@@ -60,9 +68,13 @@ val appModule = module {
             annotationDao     = get(),
             criticalMomentDao = get(),
             gameEvaluationDao = get(),
+            moveTimeDao       = get(),
             engine            = get(),
             opening           = get(),
             truthMapBuilder   = get(),
+            settingsRepo      = get(),
+            masteryRepo       = get(),
+            deviationAnalyzer = get(),
         )
     }
     viewModel { (gameId: Long) ->
@@ -73,5 +85,15 @@ val appModule = module {
             moveTimeDao = get(),
         )
     }
-    viewModel { DashboardViewModel(get(), get()) }
+    viewModel { DashboardViewModel(get(), get(), get()) }
+    viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }
+    viewModel { SettingsViewModel(get(), get(), get(), get(), get()) }
+    viewModel { (categoryNames: List<String>) ->
+        WeaknessDrillViewModel(
+            categoryNames     = categoryNames,
+            criticalMomentDao = get(),
+            repo              = get(),
+            engine            = get(),
+        )
+    }
 }

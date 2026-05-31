@@ -4,13 +4,24 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
+import com.acepero13.android.gamereviewer.domain.CoachingTrigger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** Per-trigger mastery display row for the Habit Progress card. */
+data class HabitMasteryRow(
+    val label: String,
+    val typeName: String,
+    val streak: Int,
+    val mastered: Boolean,
+)
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
@@ -19,6 +30,7 @@ data class DashboardUiState(
     val totalCriticalMoments: Int = 0,
     val trends: List<BehavioralDiagnostic.FailureTrend> = emptyList(),
     val hasWishfulThinking: Boolean = false,
+    val habitRows: List<HabitMasteryRow> = emptyList(),
     val error: String? = null,
 )
 
@@ -31,6 +43,7 @@ data class DashboardUiState(
 class DashboardViewModel(
     private val repo: GameRepository,
     private val criticalMomentDao: CriticalMomentDao,
+    private val masteryRepo: TriggerMasteryRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -50,6 +63,18 @@ class DashboardViewModel(
                 val trends        = BehavioralDiagnostic.diagnose(allMoments, topN = 3)
                 val wishful       = BehavioralDiagnostic.hasWishfulThinking(allMoments)
 
+                val streaks   = masteryRepo.streaks.first()
+                val habitRows = CoachingTrigger.ALL_LABELS.map { label ->
+                    val typeName = masteryRepo.labelToTypeName(label)
+                    val streak   = streaks[label] ?: 0
+                    HabitMasteryRow(
+                        label    = label,
+                        typeName = typeName,
+                        streak   = streak,
+                        mastered = streak >= TriggerMasteryRepository.MASTERY_THRESHOLD,
+                    )
+                }
+
                 _uiState.update {
                     it.copy(
                         isLoading              = false,
@@ -58,6 +83,7 @@ class DashboardViewModel(
                         totalCriticalMoments   = allMoments.size,
                         trends                 = trends,
                         hasWishfulThinking     = wishful,
+                        habitRows              = habitRows,
                     )
                 }
             } catch (e: Exception) {

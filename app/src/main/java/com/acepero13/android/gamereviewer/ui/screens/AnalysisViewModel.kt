@@ -5,14 +5,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
+import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
+import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
+import kotlinx.coroutines.flow.first
+import com.acepero13.android.gamereviewer.domain.CoachingTrigger
+import com.acepero13.android.gamereviewer.domain.CoachingTriggerEvaluator
 import com.acepero13.android.gamereviewer.domain.InsightReconciler
+import com.acepero13.android.gamereviewer.domain.OpeningDeviation
+import com.acepero13.android.gamereviewer.domain.OpeningDeviationAnalyzer
 import com.acepero13.android.gamereviewer.domain.extractUciMovesFromFullPgn
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.domain.TruthMapEntry
+import com.acepero13.android.gamereviewer.engine.highlights.BoardAttackHelper
+import com.acepero13.android.gamereviewer.engine.highlights.GameHighlight
+import com.acepero13.android.gamereviewer.engine.highlights.GameHighlightEngine
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.data.model.PositionAnnotation
@@ -26,13 +37,17 @@ import com.acepero13.chess.core.ui.components.TreeDisplayItem
 import com.acepero13.chess.core.util.ChessUtils
 import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Piece
+import com.github.bhlangonijr.chesslib.PieceType
 import com.github.bhlangonijr.chesslib.Side
 import com.github.bhlangonijr.chesslib.Square
 import com.github.bhlangonijr.chesslib.move.Move
+import com.github.bhlangonijr.chesslib.move.MoveGenerator
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import android.util.Log
+import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +61,41 @@ private const val TAG = "AnalysisVM"
 
 enum class ReviewMode { NAVIGATE, ANALYSE, MENTOR }
 enum class AnalyseSubMode { VIEW, EDIT, EXPLORE }
+
+/** Result of the user's attempted move in Mentor move-input mode. */
+enum class MentorMoveResult { CORRECT, CLOSE, INCORRECT }
+
+/**
+ * Cross-game coaching context computed when a Mentor Session starts.
+ * Null when not enough data exists (fewer than 2 games analyzed).
+ */
+data class WeaknessContext(
+    val trendTitle: String,
+    val trendEmoji: String,
+    val trendDescription: String,
+    val gamesAffected: Int,
+    val totalGamesAnalyzed: Int,
+    val matchingMoveIndices: List<Int>,
+)
+
+/** A single unanswered position shown in end-of-session Board Scan Reflection mode. */
+data class ReflectionItem(
+    val moveIndex: Int,
+    val fen: String,
+    /** The trigger type name that fired here — used for keying. */
+    val triggerTypeName: String,
+    /** Human-readable label for the correct answer (e.g. "Safety Issue"). */
+    val correctLabel: String,
+    /** User's selection from [CoachingTrigger.ALL_LABELS]. Null until answered. */
+    val userAnswer: String? = null,
+)
+
+/** A single option in the post-move "Why was this critical?" classification quiz. */
+data class ClassificationOption(
+    val label:       String,
+    val description: String,
+    val category:    com.acepero13.android.gamereviewer.data.model.CriticalMoment.ReasonCategory,
+)
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -73,6 +123,9 @@ data class AnalysisUiState(
     // ── Missed Moment (Task 3.2) ─────────────────────────────────────────────
     val showMissedMomentBanner: Boolean = false,
     val missedMomentMoveIndex: Int? = null,
+    /** Tracks the last moveIndex at which each reasonCategory banner was shown, used to
+     *  suppress repeat interventions for the same issue on consecutive moves. */
+    val shownCategoryAtMove: Map<String, Int> = emptyMap(),
 
     // ── Guided Discovery (Task 3.3) ──────────────────────────────────────────
     /** True while the guided discovery panel is open; navigation is frozen. */
@@ -117,6 +170,16 @@ data class AnalysisUiState(
     /** True when the Mentor button should be enabled (ENGINE_MARKED moment at current index). */
     val mentorAvailable: Boolean = false,
 
+    // ── Mentor move-input mode ────────────────────────────────────────────────
+    /** True when the user has activated "Play your answer" in the mentor panel. */
+    val mentorMoveInputActive: Boolean = false,
+    /** True while the engine is checking the user's move against the best move. */
+    val mentorMoveChecking: Boolean = false,
+    /** Result of the last move the user played in mentor mode. Null = no attempt yet. */
+    val mentorMoveResult: MentorMoveResult? = null,
+    /** Human-readable feedback shown after a move check. */
+    val mentorMoveFeedback: String = "",
+
     // ── Analyse mode engine toggles ──────────────────────────────────────────
     val evalBarVisible: Boolean = false,
     val bestMoveVisible: Boolean = false,
@@ -125,9 +188,97 @@ data class AnalysisUiState(
 
     // ── Edit sub-mode annotation color (shared by arrows and square marks) ──
     val currentArrowColor: Color = Color(0xCCF0A500.toInt()),   // ChessGold default
+
+    // ── Game highlights (produced by rule engine after background analysis) ──
+    val gameHighlights: List<GameHighlight> = emptyList(),
+
+    // ── Stats sheet ──────────────────────────────────────────────────────────
+    /** True when the stats bottom-sheet is open. */
+    val showStatsSheet: Boolean = false,
+    /** Per-side accuracy/quality stats, null until first sheet open (lazy). */
+    val playerStats: Pair<com.acepero13.android.gamereviewer.data.model.PlayerStats, com.acepero13.android.gamereviewer.data.model.PlayerStats>? = null,
+
+    // ── Mentor context label (shown as banner when Mentor navigates the board) ──
+    /** Human-readable label shown when Mentor auto-navigates to a decision point.
+     *  E.g. "Move 14. — Find the best move for White". Cleared on exitMentorMode. */
+    val mentorContextLabel: String = "",
+
+    // ── Mentor session (top-N mistakes review) ───────────────────────────────
+    /** Ordered list of moveIndices to review this session (sorted by severity desc). */
+    val mentorSessionQueue: List<Int> = emptyList(),
+    /** Current position (0-based) inside [mentorSessionQueue]. */
+    val mentorSessionIdx: Int = 0,
+
+    // ── Post-move classification quiz ────────────────────────────────────────
+    /** True when the "Why was this critical?" 4-option quiz should be shown. */
+    val showClassificationQuiz: Boolean = false,
+    /** The 4 shuffled options for the quiz (one is correct). */
+    val classificationOptions: List<ClassificationOption> = emptyList(),
+    /** Index into [classificationOptions] that is the correct answer. */
+    val classificationCorrectIndex: Int = -1,
+    /** Index selected by the user. -1 = not yet selected. */
+    val classificationSelectedIndex: Int = -1,
+
+    // ── Mentor insight reveal gate ────────────────────────────────────────────
+    /** False until the user has attempted a move, asked for a hint, or revealed the answer.
+     *  While false the panel hides the specific motif title so the user must think first. */
+    val guidedDiscoveryInsightRevealed: Boolean = false,
+
+    // ── Weakness-aware coaching context ──────────────────────────────────────
+    /** Cross-game weakness summary shown at the start of a Mentor session. Null until computed. */
+    val weaknessContext: WeaknessContext? = null,
+    /** True while the Coach's Briefing banner should be visible at session start. */
+    val showCoachsBriefing: Boolean = false,
+
+    // ── Proactive coaching triggers (Board Scan) ──────────────────────────────
+    /** All coaching triggers detected for this game, keyed by moveIndex. */
+    val triggersByMove: Map<Int, List<CoachingTrigger>> = emptyMap(),
+    /** The trigger currently being shown in the proactive coaching panel. Null when panel hidden. */
+    val activeProactiveTrigger: CoachingTrigger? = null,
+    /** True when the ProactiveCoachingPanel is visible. */
+    val showProactiveCoaching: Boolean = false,
+    /** Move indices where the user tapped the Coach Lamp — used to build reflection items. */
+    val triggersEngaged: Set<Int> = emptySet(),
+
+    // ── Interactive coach answer mode ─────────────────────────────────────────
+    /** True while the user is being prompted to tap a square on the board to answer. */
+    val proactiveInteractiveMode: Boolean = false,
+    /** Feedback text shown after the user selects a square. Null = no answer yet. */
+    val proactiveAnswerFeedback: String? = null,
+    /** True = user's tapped square was correct, False = wrong, null = no answer yet. */
+    val proactiveAnswerIsCorrect: Boolean? = null,
+    /** Temporary square highlights added by the coach (not saved as annotations). */
+    val coachHighlightSquares: List<MarkedSquare> = emptyList(),
+    /** All hanging squares detected at the current position for PreMoveChecklist. */
+    val proactiveHangingSquares: List<String> = emptyList(),
+    /** Subset of [proactiveHangingSquares] belonging to the user's own pieces. */
+    val proactiveHangingOwnSquares: Set<String> = emptySet(),
+    /** Subset of [proactiveHangingSquares] the user has already tapped correctly. */
+    val proactiveFoundSquares: Set<String> = emptySet(),
+
+    // ── Board Scan Reflection Mode (end of Mentor session) ───────────────────
+    /** True when Reflection Mode is active (shown after Mentor session completes). */
+    val showReflectionMode: Boolean = false,
+    /** Positions with un-engaged triggers the user can now self-categorize. */
+    val reflectionItems: List<ReflectionItem> = emptyList(),
+
+    // ── Structured Analysis Prompts (position coach) ──────────────────────────
+    /** Mirrors the setting — false = card never shown regardless of highlights. */
+    val positionCoachEnabled: Boolean = false,
+    /** Move indices where the user has already dismissed the coach card this session. */
+    val positionCoachDismissedMoves: Set<Int> = emptySet(),
+
+    // ── Opening Theory Coach ──────────────────────────────────────────────────
+    /** First deviation from opening book theory, null if game stayed in book or no data. */
+    val openingDeviation: OpeningDeviation? = null,
+    /** True while the OpeningDeviationPanel is shown (user navigated to the deviation move). */
+    val showOpeningDeviationPanel: Boolean = false,
+    /** True once the user has dismissed the panel — prevents it re-appearing on re-navigation. */
+    val openingDeviationDismissed: Boolean = false,
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+private const val CATEGORY_COOLDOWN_MOVES = 5
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
 
@@ -137,9 +288,13 @@ class AnalysisViewModel(
     private val annotationDao: PositionAnnotationDao,
     private val criticalMomentDao: CriticalMomentDao,
     private val gameEvaluationDao: GameEvaluationDao,
+    private val moveTimeDao: MoveTimeDao,
     private val engine: StockfishEngine,
     private val opening: OpeningClassifier,
     private val truthMapBuilder: TruthMapBuilder,
+    private val settingsRepo: SettingsRepository,
+    private val masteryRepo: TriggerMasteryRepository,
+    private val deviationAnalyzer: OpeningDeviationAnalyzer,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AnalysisUiState())
@@ -267,13 +422,20 @@ class AnalysisViewModel(
             annotationDao.upsert(upd)
             annotationCache[fen] = upd
 
+            // Look up the engine's verdict for this position; fall back to STRATEGIC_MISTAKE
+            // when background analysis hasn't run yet or this move wasn't flagged.
+            val truthEntry     = truthMap.find { it.moveIndex == idx }
+            val reasonCategory = truthEntry?.let { motifToReason(it) }
+                ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
+            val severity       = truthEntry?.let { kotlin.math.abs(it.playerEvalDelta) } ?: 0
+
             criticalMomentDao.insert(
                 CriticalMoment(
                     gameId           = gameId,
                     moveIndex        = idx,
                     type             = CriticalMoment.Type.USER_MARKED.name,
-                    severity         = 0,
-                    reasonCategory   = CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name,
+                    severity         = severity,
+                    reasonCategory   = reasonCategory,
                     explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
                     fen              = fen,
                 )
@@ -293,8 +455,35 @@ class AnalysisViewModel(
     // PUBLIC — Missed Moment banner (Task 3.2)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Stats sheet
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun toggleStatsSheet() {
+        val nowOpen = !_uiState.value.showStatsSheet
+        _uiState.update { it.copy(showStatsSheet = nowOpen) }
+        if (nowOpen && _uiState.value.playerStats == null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val game = _uiState.value.game ?: return@launch
+                val evals = gameEvaluationDao.getByGameId(gameId)
+                val times = moveTimeDao.getByGameId(gameId)
+                val stats = com.acepero13.android.gamereviewer.domain.PlayerStatsCalculator
+                    .compute(game, evals, times)
+                _uiState.update { it.copy(playerStats = stats) }
+            }
+        }
+    }
+
+    fun dismissStatsSheet() {
+        _uiState.update { it.copy(showStatsSheet = false) }
+    }
+
     fun dismissMissedMomentBanner() {
         _uiState.update { it.copy(showMissedMomentBanner = false, missedMomentMoveIndex = null) }
+    }
+
+    fun dismissOpeningDeviationPanel() {
+        _uiState.update { it.copy(showOpeningDeviationPanel = false, openingDeviationDismissed = true) }
     }
 
     /**
@@ -303,8 +492,11 @@ class AnalysisViewModel(
      */
     fun reviewMissedMoment() {
         val idx = _uiState.value.missedMomentMoveIndex ?: return
-        dismissMissedMomentBanner()
-        enterMentorMode(targetMoveIndex = idx)
+        dismissMissedMomentBanner()          // state update #1 — banner begins slideOut animation
+        viewModelScope.launch {
+            delay(200)                       // let the slideOutVertically animation complete
+            enterMentorMode(targetMoveIndex = idx)
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -362,6 +554,287 @@ class AnalysisViewModel(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Proactive coaching (Board Scan triggers)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Opens the ProactiveCoachingPanel for the primary trigger at the current position. */
+    fun enterProactiveCoaching() {
+        val idx     = _uiState.value.moveIndex
+        val trigger = _uiState.value.triggersByMove[idx]?.firstOrNull() ?: return
+        _uiState.update {
+            it.copy(
+                showProactiveCoaching = true,
+                activeProactiveTrigger = trigger,
+                triggersEngaged       = it.triggersEngaged + idx,
+            )
+        }
+    }
+
+    fun dismissProactiveCoaching() {
+        // Keep activeProactiveTrigger non-null so the Panel's exit animation
+        // can play while still in composition. It is cleared in applyMoveIndex
+        // when the user navigates to the next position.
+        _uiState.update { it.copy(
+            showProactiveCoaching       = false,
+            proactiveInteractiveMode    = false,
+            proactiveAnswerFeedback     = null,
+            proactiveAnswerIsCorrect    = null,
+            coachHighlightSquares       = emptyList(),
+            proactiveHangingSquares     = emptyList(),
+            proactiveHangingOwnSquares  = emptySet(),
+            proactiveFoundSquares       = emptySet(),
+        )}
+    }
+
+    /** Marks the current position coach card as dismissed for this session. */
+    fun dismissPositionCoach() {
+        val idx = _uiState.value.moveIndex
+        _uiState.update { it.copy(
+            positionCoachDismissedMoves = it.positionCoachDismissedMoves + idx,
+        )}
+    }
+
+    /** Activates board-tap routing so the user can select a square to answer the coach's question. */
+    fun startProactiveInteraction() {
+        val trigger = _uiState.value.activeProactiveTrigger
+        // For PreMoveChecklist, detect ALL hanging squares from the live FEN.
+        // For CctCheck, detect all squares targeted by the opponent's CCT moves.
+        val (targetSquares, ownSquares) = when (trigger) {
+            is CoachingTrigger.PreMoveChecklist -> detectAllHangingSquares()
+            is CoachingTrigger.CctCheck         -> Pair(detectOpponentCctSquares(), emptySet())
+            else                                -> Pair(emptyList(), emptySet())
+        }
+
+        _uiState.update { it.copy(
+            proactiveInteractiveMode    = true,
+            proactiveAnswerFeedback     = null,
+            proactiveAnswerIsCorrect    = null,
+            coachHighlightSquares       = emptyList(),
+            proactiveHangingSquares     = targetSquares,
+            proactiveHangingOwnSquares  = ownSquares,
+            proactiveFoundSquares       = emptySet(),
+        )}
+    }
+
+    /** Scans the current board position for pieces with more attackers than defenders. */
+    /** Returns (allHangingSquareNames, ownHangingSquareNames) split by player side. */
+    private fun detectAllHangingSquares(): Pair<List<String>, Set<String>> {
+        val fen = _uiState.value.boardState.fen
+        if (fen.isBlank()) return Pair(emptyList(), emptySet())
+        val board = runCatching { Board().apply { loadFromFen(fen) } }.getOrNull()
+            ?: return Pair(emptyList(), emptySet())
+        val userSide = if (boardFlippedForBlack) Side.BLACK else Side.WHITE
+        val hanging = BoardAttackHelper.allPieces(board)
+            .filter { (_, piece) -> piece.pieceType != PieceType.KING }
+            .filter { (sq, piece) -> BoardAttackHelper.isGenuinelyHanging(board, sq, piece) }
+        val all = hanging.map { (sq, _) -> sq.name }
+        val own = hanging.filter { (_, piece) -> piece.pieceSide == userSide }.map { (sq, _) -> sq.name }.toSet()
+        return Pair(all, own)
+    }
+
+    /**
+     * Computes all squares targeted by the opponent's Check, Capture, or Threat moves
+     * from the current board position. The FEN after the user's move has the opponent to move,
+     * so we enumerate their legal moves and collect any that are checks or captures.
+     */
+    private fun detectOpponentCctSquares(): List<String> {
+        val fen = _uiState.value.boardState.fen
+        if (fen.isBlank()) return emptyList()
+        val board = runCatching { Board().apply { loadFromFen(fen) } }.getOrNull() ?: return emptyList()
+        val sideToMove = board.sideToMove
+        return MoveGenerator.generateLegalMoves(board).mapNotNull { move ->
+            val targetPiece = board.getPiece(move.to)
+            val isCapture   = targetPiece != Piece.NONE && targetPiece.pieceSide != sideToMove
+            val givesCheck  = runCatching {
+                val clone = Board().apply { loadFromFen(fen) }
+                clone.doMove(move)
+                clone.isKingAttacked
+            }.getOrDefault(false)
+            if (isCapture || givesCheck) move.to.name else null
+        }.distinct()
+    }
+
+    /** Validates the square the user tapped against the active trigger's expected answer. */
+    fun answerProactiveQuestion(square: Square) {
+        val trigger = _uiState.value.activeProactiveTrigger ?: return
+        val state   = _uiState.value
+
+        // ── Multi-select mode: PreMoveChecklist and CctCheck ─────────────────
+        val isMultiSelect = (trigger is CoachingTrigger.PreMoveChecklist || trigger is CoachingTrigger.CctCheck)
+                && state.proactiveHangingSquares.isNotEmpty()
+        if (isMultiSelect) {
+            val green  = Color(0xFF22C55E)
+            val blue   = Color(0xFF3B82F6)
+            val red    = Color(0xFFEF4444)
+            val sqName = square.name
+
+            if (sqName in state.proactiveHangingSquares) {
+                val newFound = state.proactiveFoundSquares + sqName
+                val total    = state.proactiveHangingSquares.size
+                val allFound = newFound.size == total
+                val feedback = when {
+                    trigger is CoachingTrigger.CctCheck && allFound ->
+                        "All $total opponent CCT target${if (total == 1) "" else "s"} found! Good threat awareness."
+                    trigger is CoachingTrigger.CctCheck ->
+                        "Correct! ${newFound.size}/$total found — keep scanning for checks and captures."
+                    allFound ->
+                        "All $total hanging piece${if (total == 1) "" else "s"} found! Great board scan."
+                    else ->
+                        "Correct! ${newFound.size}/$total found — keep looking for more loose pieces."
+                }
+                val isOwn     = sqName in state.proactiveHangingOwnSquares
+                val hitColor  = if (isOwn) green else blue
+                _uiState.update { it.copy(
+                    proactiveAnswerFeedback  = feedback,
+                    proactiveAnswerIsCorrect = true,
+                    proactiveFoundSquares    = newFound,
+                    proactiveInteractiveMode = !allFound,
+                    coachHighlightSquares    = it.coachHighlightSquares +
+                        MarkedSquare(square, hitColor.copy(alpha = 0.6f)),
+                )}
+            } else {
+                val missMsg = if (trigger is CoachingTrigger.CctCheck)
+                    "That square isn't targeted by a check or capture. Look for opponent moves that win material or give check."
+                else
+                    "That piece is adequately defended. Count attackers vs. defenders — find one where attackers win."
+                _uiState.update { it.copy(
+                    proactiveAnswerFeedback  = missMsg,
+                    proactiveAnswerIsCorrect = false,
+                    coachHighlightSquares    = it.coachHighlightSquares +
+                        MarkedSquare(square, red.copy(alpha = 0.45f)),
+                )}
+            }
+            return
+        }
+
+        // ── Other triggers: single-square mode ────────────────────────────────
+        val (feedback, correct, coachMarks) = evaluateProactiveAnswer(trigger, square)
+        _uiState.update { it.copy(
+            proactiveInteractiveMode = false,
+            proactiveAnswerFeedback  = feedback,
+            proactiveAnswerIsCorrect = correct,
+            coachHighlightSquares    = coachMarks,
+        )}
+    }
+
+    private fun evaluateProactiveAnswer(
+        trigger: CoachingTrigger,
+        tapped:  Square,
+    ): Triple<String, Boolean?, List<MarkedSquare>> {
+        val green = Color(0xFF22C55E)
+        val red   = Color(0xFFEF4444)
+
+        fun squareFromName(name: String?) =
+            if (name.isNullOrBlank()) null
+            else runCatching { Square.valueOf(name) }.getOrNull()
+
+        return when (trigger) {
+            is CoachingTrigger.WorstPiece -> {
+                val answer = squareFromName(trigger.pieceSquare)
+                if (answer != null && tapped == answer) {
+                    Triple(
+                        "Correct! That piece has only ${trigger.mobility} move${if (trigger.mobility == 1) "" else "s"} — it needs rerouting.",
+                        true,
+                        listOf(MarkedSquare(tapped, green.copy(alpha = 0.6f))),
+                    )
+                } else {
+                    val marks = buildList {
+                        add(MarkedSquare(tapped, red.copy(alpha = 0.5f)))
+                        if (answer != null) add(MarkedSquare(answer, green.copy(alpha = 0.6f)))
+                    }
+                    Triple(
+                        "Not quite — find the piece with the fewest legal moves.",
+                        false,
+                        marks,
+                    )
+                }
+            }
+
+            is CoachingTrigger.Safety -> {
+                val kingSquare = squareFromName(trigger.kingSquare)
+                val isKing = kingSquare != null && tapped == kingSquare
+                val marks = if (isKing) listOf(MarkedSquare(tapped, green.copy(alpha = 0.6f)))
+                            else buildList {
+                                add(MarkedSquare(tapped, red.copy(alpha = 0.5f)))
+                                if (kingSquare != null) add(MarkedSquare(kingSquare, green.copy(alpha = 0.6f)))
+                            }
+                Triple(
+                    if (isKing) "That's your King — now count the friendly pieces guarding the adjacent squares."
+                    else        "That's not your King. Tap the King to assess its exposure.",
+                    if (isKing) true else false,
+                    marks,
+                )
+            }
+
+            else -> Triple("Good thinking! Continue reviewing this position.", true, emptyList())
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Board Scan Reflection Mode
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Builds the reflection list from all trigger positions the user navigated
+     * past without engaging the Coach Lamp, then activates Reflection Mode.
+     */
+    fun enterReflectionMode() {
+        val engaged     = _uiState.value.triggersEngaged
+        val triggerMap  = _uiState.value.triggersByMove
+        val items       = triggerMap.entries
+            .filter { (idx, _) -> idx !in engaged }
+            .sortedBy { (idx, _) -> idx }
+            .mapNotNull { (idx, triggers) ->
+                val trigger = triggers.firstOrNull() ?: return@mapNotNull null
+                val fen     = fenSequence.getOrElse(idx) { "" }
+                ReflectionItem(
+                    moveIndex       = idx,
+                    fen             = fen,
+                    triggerTypeName = trigger.typeName(),
+                    correctLabel    = trigger.displayLabel(),
+                )
+            }
+        if (items.isEmpty()) {
+            exitMentorMode()
+            return
+        }
+        _uiState.update {
+            it.copy(
+                showReflectionMode = true,
+                reflectionItems    = items,
+            )
+        }
+    }
+
+    /** Records the user's self-categorization for one reflection item and updates mastery streak. */
+    fun answerReflection(moveIndex: Int, answer: String) {
+        val updated = _uiState.value.reflectionItems.map { item ->
+            if (item.moveIndex == moveIndex) item.copy(userAnswer = answer) else item
+        }
+        _uiState.update { it.copy(reflectionItems = updated) }
+
+        // Update mastery streak for the trigger type at this position
+        val item = _uiState.value.reflectionItems.firstOrNull { it.moveIndex == moveIndex } ?: return
+        val typeName  = item.triggerTypeName
+        val isCorrect = answer == item.correctLabel
+        viewModelScope.launch(Dispatchers.IO) {
+            if (isCorrect) masteryRepo.recordCorrect(typeName)
+            else           masteryRepo.recordIncorrect(typeName)
+        }
+    }
+
+    /** Closes Reflection Mode and returns to Navigate. */
+    fun exitReflectionMode() {
+        _uiState.update {
+            it.copy(
+                showReflectionMode = false,
+                reflectionItems    = emptyList(),
+            )
+        }
+        exitMentorMode()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // PUBLIC — New mode system (Navigate / Analyse / Mentor)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -412,14 +885,37 @@ class AnalysisViewModel(
      */
     fun enterMentorMode(targetMoveIndex: Int = _uiState.value.moveIndex) {
         val from    = _uiState.value.reviewMode
+        // Look up the critical moment using the target index (position after the move).
         val moment  = _uiState.value.criticalMoments
             .firstOrNull { it.moveIndex == targetMoveIndex && it.type == CriticalMoment.Type.ENGINE_MARKED.name }
         val reason  = moment?.toReason() ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE
         val insight = InsightReconciler.forReason(reason)
         val clamped = targetMoveIndex.coerceIn(0, uciMoves.size)
 
+        // Navigate to the decision point — the position BEFORE the critical move.
+        // At fenSequence[clamped] the opponent is to move (the mistake has already been played),
+        // so the user cannot tap their own pieces. fenSequence[clamped - 1] is where the player
+        // still needs to choose and move input works correctly.
+        val displayIndex = (clamped - 1).coerceAtLeast(0)
+
+        // Build a context label that tells the user *which* move to find
+        // WITHOUT revealing the actual move played (which would leak the answer).
+        val fullMove = clamped / 2 + 1
+        val displayFen = fenSequence.getOrElse(displayIndex) { START_FEN }
+        val sideToMove = runCatching {
+            Board().apply { loadFromFen(displayFen) }.sideToMove
+        }.getOrNull()
+        val who = when (sideToMove) {
+            Side.WHITE -> "White"
+            Side.BLACK -> "Black"
+            else       -> "you"
+        }
+        val contextLabel = "Move $fullMove. — Find the best move for $who"
+
         viewModelScope.launch(Dispatchers.Default) {
-            applyMoveIndex(clamped)
+            Log.d("MentorTap", "enterMentorMode coroutine start — current reviewMode=${_uiState.value.reviewMode}")
+            applyMoveIndex(displayIndex)
+            Log.d("MentorTap", "enterMentorMode after applyMoveIndex — reviewMode=${_uiState.value.reviewMode}")
             _uiState.update {
                 it.copy(
                     reviewMode                    = ReviewMode.MENTOR,
@@ -436,14 +932,26 @@ class AnalysisViewModel(
                         isEditorMode = false,
                         arrows       = emptyList(),
                     ),
-                    showMissedMomentBanner = false,
+                    showMissedMomentBanner        = false,
+                    mentorMoveInputActive         = false,
+                    mentorMoveChecking            = false,
+                    mentorMoveResult              = null,
+                    mentorMoveFeedback            = "",
+                    mentorContextLabel            = contextLabel,
+                    showClassificationQuiz        = false,
+                    classificationOptions         = emptyList(),
+                    classificationCorrectIndex    = -1,
+                    classificationSelectedIndex   = -1,
+                    guidedDiscoveryInsightRevealed = false,
                 )
             }
+            Log.d("MentorTap", "enterMentorMode complete — reviewMode=${_uiState.value.reviewMode} mentorMoveInputActive=${_uiState.value.mentorMoveInputActive}")
         }
     }
 
     /** Exits Mentor mode and returns to [previousReviewMode]. All state reset atomically. */
     fun exitMentorMode() {
+        Log.d("MentorTap", "exitMentorMode called — current reviewMode=${_uiState.value.reviewMode} mentorMoveInputActive=${_uiState.value.mentorMoveInputActive}", Exception("exitMentorMode stacktrace"))
         val returnTo = _uiState.value.previousReviewMode
         val idx      = _uiState.value.moveIndex
         _uiState.update {
@@ -455,36 +963,260 @@ class AnalysisViewModel(
                 guidedDiscoveryAnswerRevealed = false,
                 guidedDiscoveryHintVisible    = false,
                 guidedDiscoveryRevealedEvalCp = null,
+                mentorMoveInputActive         = false,
+                mentorMoveChecking            = false,
+                mentorMoveResult              = null,
+                mentorMoveFeedback            = "",
+                mentorContextLabel            = "",
+                // Clear session
+                mentorSessionQueue            = emptyList(),
+                mentorSessionIdx              = 0,
+                // Clear classification quiz
+                showClassificationQuiz        = false,
+                classificationOptions         = emptyList(),
+                classificationCorrectIndex    = -1,
+                classificationSelectedIndex   = -1,
+                guidedDiscoveryInsightRevealed = false,
+                // Clear weakness context
+                weaknessContext               = null,
+                showCoachsBriefing            = false,
+                // Clear proactive coaching + reflection state
+                showProactiveCoaching         = false,
+                activeProactiveTrigger        = null,
+                triggersEngaged               = emptySet(),
+                showReflectionMode            = false,
+                reflectionItems               = emptyList(),
             )
         }
         viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
     }
 
-    /** Toggles the evaluation bar visibility. Reads eval from the truth map. */
-    fun toggleEvalBar() {
-        _uiState.update { it.copy(evalBarVisible = !it.evalBarVisible) }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Mentor move-input (play your answer on the board)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Toggles "Play your answer" mode in the mentor panel.
+     * When active the board accepts piece selection and move attempts.
+     * Resets any previous attempt result so the user can try again.
+     */
+    fun toggleMentorMoveInput() {
+        val nowActive = !_uiState.value.mentorMoveInputActive
+        Log.d("MentorTap", "toggleMentorMoveInput: nowActive=$nowActive | current reviewMode=${_uiState.value.reviewMode}")
+        val idx       = _uiState.value.moveIndex
+        val fen       = fenSequence.getOrElse(idx) { START_FEN }
+        _uiState.update {
+            it.copy(
+                mentorMoveInputActive = nowActive,
+                mentorMoveChecking    = false,
+                mentorMoveResult      = null,
+                mentorMoveFeedback    = "",
+                boardState            = it.boardState.copy(
+                    fen            = fen,      // restore original position if a move was shown
+                    lastMove       = null,
+                    selectedSquare = null,
+                    legalMoves     = emptyList(),
+                    // KEY: ChessBoard routes taps through detectTapGestures → onSquareTap only
+                    // when isEditorMode = FALSE. When true, the board uses the arrow/mark gesture
+                    // handler and onSquareTap is never called. Mentor move-input needs onSquareTap,
+                    // so we must keep isEditorMode = false here.
+                    isEditorMode   = false,
+                ),
+            )
+        }
+        Log.d("MentorTap", "toggleMentorMoveInput done — reviewMode=${_uiState.value.reviewMode} mentorMoveInputActive=${_uiState.value.mentorMoveInputActive}")
     }
 
     /**
-     * Toggles best-move arrow visibility. When turning on, fires a quick engine analysis
-     * to fetch the best move UCI and draws it as an arrow on the board.
+     * Handles a square tap on the board while mentor move-input is active.
+     *
+     * First tap → selects the piece and shows legal-move highlights.
+     * Second tap on a legal target → plays the move and starts engine check.
+     * Second tap on an illegal square → deselects.
+     */
+    fun onMentorSquareTap(square: Square) {
+        val st = _uiState.value
+        Log.d("MentorTap", "onMentorSquareTap: square=$square | mentorMoveInputActive=${st.mentorMoveInputActive} | mentorMoveChecking=${st.mentorMoveChecking} | reviewMode=${st.reviewMode} | isEditorMode=${st.boardState.isEditorMode}")
+        if (!st.mentorMoveInputActive) {
+            Log.d("MentorTap", "  → EARLY RETURN: mentorMoveInputActive is false")
+            return
+        }
+        if (st.mentorMoveChecking) {
+            Log.d("MentorTap", "  → EARLY RETURN: mentorMoveChecking is true")
+            return
+        }
+
+        val cur      = st.boardState
+        val selected = cur.selectedSquare
+        Log.d("MentorTap", "  selectedSquare=$selected  fen=${cur.fen.take(30)}…")
+
+        if (selected == null) {
+            val board = Board().apply { loadFromFen(cur.fen) }
+            val piece = board.getPiece(square)
+            Log.d("MentorTap", "  first tap: piece=$piece sideToMove=${board.sideToMove}")
+            if (piece != Piece.NONE && piece.pieceSide == board.sideToMove) {
+                val legal = board.legalMoves().filter { it.from == square }
+                Log.d("MentorTap", "  selecting piece — ${legal.size} legal moves")
+                _uiState.update { it.copy(boardState = cur.copy(selectedSquare = square, legalMoves = legal)) }
+            } else {
+                Log.d("MentorTap", "  piece is NONE or wrong side — ignoring")
+            }
+        } else {
+            val board = Board().apply { loadFromFen(cur.fen) }
+            val move  = ChessUtils.buildMove(board, selected, square, solutionUci = null)
+            val isLegal = board.legalMoves().contains(move)
+            Log.d("MentorTap", "  second tap: move=$move isLegal=$isLegal")
+            if (isLegal) {
+                attemptMentorMove(preFen = cur.fen, move = move)
+            } else {
+                Log.d("MentorTap", "  illegal move — deselecting")
+                _uiState.update { it.copy(boardState = cur.copy(selectedSquare = null, legalMoves = emptyList())) }
+            }
+        }
+    }
+
+    /** Resets a failed mentor move attempt so the user can try a different piece. */
+    fun retryMentorMove() {
+        val idx = _uiState.value.moveIndex
+        val fen = fenSequence.getOrElse(idx) { START_FEN }
+        _uiState.update {
+            it.copy(
+                mentorMoveResult      = null,
+                mentorMoveFeedback    = "",
+                mentorMoveInputActive = true,
+                boardState            = it.boardState.copy(
+                    fen            = fen,
+                    lastMove       = null,
+                    selectedSquare = null,
+                    legalMoves     = emptyList(),
+                    isEditorMode   = false,  // must be false: onSquareTap only fires when isEditorMode=false
+                ),
+            )
+        }
+    }
+
+    // ─── Private: check move against engine ───────────────────────────────────
+
+    private fun attemptMentorMove(preFen: String, move: Move) {
+        val playerUci  = "${move.from.name.lowercase()}${move.to.name.lowercase()}"
+        val postBoard  = Board().apply { loadFromFen(preFen) }
+        postBoard.doMove(move)
+        val postFen        = postBoard.fen
+        val playerWasWhite = postBoard.sideToMove == Side.BLACK  // after White's move it's Black's turn
+
+        // Show the move immediately for visual feedback
+        _uiState.update {
+            it.copy(
+                mentorMoveChecking = true,
+                boardState         = it.boardState.copy(
+                    fen            = postFen,
+                    lastMove       = move,
+                    selectedSquare = null,
+                    legalMoves     = emptyList(),
+                ),
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.Default) {
+            // Best move at the pre-move position
+            val preResult  = runCatching {
+                engine.analyzePosition(preFen, depth = ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+            }.getOrNull()
+            val bestUci    = preResult?.bestMoveUci ?: ""
+            val preEvalWp  = preResult?.let { r ->
+                val b = Board().apply { loadFromFen(preFen) }
+                r.toWhitePerspective(b)
+            } ?: 0
+
+            // Eval after the player's move
+            val postResult = runCatching {
+                engine.analyzePosition(postFen, depth = 10)
+            }.getOrNull()
+            val postEvalWp = postResult?.toWhitePerspective(postBoard) ?: preEvalWp
+
+            // Centipawn loss from the moving player's perspective
+            val cpLoss = maxOf(0,
+                if (playerWasWhite) preEvalWp - postEvalWp
+                else                postEvalWp - preEvalWp
+            )
+
+            val result = when {
+                playerUci == bestUci -> MentorMoveResult.CORRECT
+                cpLoss <= 50         -> MentorMoveResult.CLOSE      // within half a pawn — acceptable
+                else                 -> MentorMoveResult.INCORRECT
+            }
+
+            val feedback = when (result) {
+                MentorMoveResult.CORRECT   ->
+                    "✅ That's the engine's best move! Great find."
+                MentorMoveResult.CLOSE     ->
+                    "👍 Good move — only ${cpLoss}cp from the best. You found the right idea."
+                MentorMoveResult.INCORRECT ->
+                    "❌ That loses about ${cpLoss}cp. Think again or use a hint."
+            }
+
+            if (result == MentorMoveResult.INCORRECT) {
+                // Restore original position so the user can retry; keep editor mode on
+                _uiState.update {
+                    it.copy(
+                        mentorMoveChecking             = false,
+                        mentorMoveResult               = result,
+                        mentorMoveFeedback             = feedback,
+                        guidedDiscoveryInsightRevealed = true,
+                        boardState                     = it.boardState.copy(
+                            fen            = preFen,
+                            lastMove       = null,
+                            selectedSquare = null,
+                            legalMoves     = emptyList(),
+                            isEditorMode   = false,
+                        ),
+                    )
+                }
+            } else {
+                // Correct/close — leave the move on the board; exit move-input mode
+                _uiState.update {
+                    it.copy(
+                        mentorMoveChecking             = false,
+                        mentorMoveResult               = result,
+                        mentorMoveFeedback             = feedback,
+                        mentorMoveInputActive          = false,
+                        guidedDiscoveryInsightRevealed = true,
+                        boardState                     = it.boardState.copy(isEditorMode = false),
+                    )
+                }
+            }
+            // Show the classification quiz after any move attempt so the user
+            // reflects on the category of mistake regardless of the outcome.
+            triggerClassificationQuiz()
+        }
+    }
+
+    /**
+     * Toggles the evaluation bar visibility.
+     * If there is no truth-map entry for the current position, fires an on-demand
+     * engine analysis so the bar always shows a value when it is switched on.
+     */
+    fun toggleEvalBar() {
+        val newVisible = !_uiState.value.evalBarVisible
+        _uiState.update { it.copy(evalBarVisible = newVisible) }
+        if (newVisible && _uiState.value.currentEvalCp == null) {
+            val fen = _uiState.value.boardState.fen
+            viewModelScope.launch(Dispatchers.Default) { fetchOnDemandEval(fen) }
+        }
+    }
+
+    /**
+     * Toggles best-move arrow visibility.
+     * When turning on, fires an engine analysis and draws the best move as an arrow.
+     * When navigating while this toggle is on, [applyMoveIndex] refreshes the arrow
+     * automatically so it tracks the current position.
      */
     fun toggleBestMove() {
         val newVisible = !_uiState.value.bestMoveVisible
         _uiState.update { it.copy(bestMoveVisible = newVisible) }
         if (newVisible) {
             val fen = _uiState.value.boardState.fen
-            viewModelScope.launch(Dispatchers.Default) {
-                val result = runCatching { engine.analyzePosition(fen, depth = 10) }.getOrNull()
-                val arrow  = result?.toArrow()
-                _uiState.update { s ->
-                    s.copy(
-                        boardState = s.boardState.copy(
-                            arrows = if (arrow != null) listOf(arrow) else emptyList(),
-                        ),
-                    )
-                }
-            }
+            viewModelScope.launch(Dispatchers.Default) { fetchOnDemandBestMove(fen) }
         } else {
             _uiState.update { it.copy(boardState = it.boardState.copy(arrows = emptyList())) }
         }
@@ -505,7 +1237,7 @@ class AnalysisViewModel(
      * Updates the [CriticalMoment] in the DB to [CriticalMoment.ExplanationState.HINTED].
      */
     fun revealGuidedHint() {
-        _uiState.update { it.copy(guidedDiscoveryHintVisible = true) }
+        _uiState.update { it.copy(guidedDiscoveryHintVisible = true, guidedDiscoveryInsightRevealed = true) }
         viewModelScope.launch(Dispatchers.IO) {
             val moment = _uiState.value.guidedDiscoveryCriticalMoment ?: return@launch
             criticalMomentDao.update(
@@ -567,13 +1299,18 @@ class AnalysisViewModel(
 
             _uiState.update { state ->
                 state.copy(
-                    guidedDiscoveryEngineThinking = false,
-                    guidedDiscoveryAnswerRevealed = true,
-                    guidedDiscoveryRevealedEvalCp = evalCp,
+                    guidedDiscoveryEngineThinking  = false,
+                    guidedDiscoveryAnswerRevealed  = true,
+                    guidedDiscoveryRevealedEvalCp  = evalCp,
+                    guidedDiscoveryInsightRevealed = true,
                     boardState = state.boardState.copy(
                         arrows = if (engineArrow != null) listOf(engineArrow) else emptyList(),
                     ),
                 )
+            }
+            // Show the classification quiz when the answer is revealed (if not already shown).
+            if (!_uiState.value.showClassificationQuiz) {
+                triggerClassificationQuiz()
             }
         }
     }
@@ -604,7 +1341,212 @@ class AnalysisViewModel(
                 refreshTreeItems()
             }
         }
-        exitMentorMode()
+        if (_uiState.value.mentorSessionQueue.isNotEmpty()) {
+            advanceMentorSession()
+        } else {
+            exitMentorMode()
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Mentor session (top-N mistakes review)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Starts a structured Mentor session that reviews the top 2–3 ENGINE_MARKED
+     * mistakes belonging to the USER (filtered by player side).
+     * Mistakes are sorted by severity (centipawn loss) descending.
+     */
+    fun enterMentorSession() {
+        viewModelScope.launch {
+            val currentMoments = _uiState.value.criticalMoments
+                .filter { it.type == CriticalMoment.Type.ENGINE_MARKED.name && isUserMove(it.moveIndex) }
+
+            if (currentMoments.isEmpty()) return@launch
+
+            // Load cross-game data to identify top weakness
+            val allMoments = withContext(Dispatchers.IO) { criticalMomentDao.getAll() }
+            val totalGamesAnalyzed = withContext(Dispatchers.IO) { criticalMomentDao.countGamesAnalyzed() }
+
+            val topTrend = withContext(Dispatchers.Default) {
+                BehavioralDiagnostic.diagnose(allMoments, topN = 1).firstOrNull()
+            }
+            val topCategories = topTrend?.triggerCategories ?: emptySet()
+
+            val queue = buildWeaknessPrioritizedQueue(currentMoments, topCategories)
+            if (queue.isEmpty()) return@launch
+
+            val matchingIndices = currentMoments
+                .filter { it.toReason() in topCategories }
+                .map { it.moveIndex }
+
+            val weaknessCtx = topTrend?.let { trend ->
+                WeaknessContext(
+                    trendTitle         = trend.title,
+                    trendEmoji         = trend.emoji,
+                    trendDescription   = trend.description,
+                    gamesAffected      = trend.frequency,
+                    totalGamesAnalyzed = totalGamesAnalyzed,
+                    matchingMoveIndices = matchingIndices,
+                )
+            }
+
+            _uiState.update {
+                it.copy(
+                    mentorSessionQueue  = queue,
+                    mentorSessionIdx    = 0,
+                    weaknessContext     = weaknessCtx,
+                    showCoachsBriefing  = weaknessCtx != null,
+                )
+            }
+            enterMentorMode(targetMoveIndex = queue[0])
+        }
+    }
+
+    private fun buildWeaknessPrioritizedQueue(
+        moments: List<CriticalMoment>,
+        topCategories: Set<CriticalMoment.ReasonCategory>,
+    ): List<Int> {
+        val weaknessMoments = moments
+            .filter { it.toReason() in topCategories }
+            .sortedByDescending { it.severity }
+        val otherMoments = moments
+            .filter { it.toReason() !in topCategories }
+            .sortedByDescending { it.severity }
+        return (weaknessMoments + otherMoments).take(3).map { it.moveIndex }
+    }
+
+    fun dismissCoachsBriefing() {
+        _uiState.update { it.copy(showCoachsBriefing = false) }
+    }
+
+    /**
+     * Advances to the next mistake in the Mentor session queue.
+     * If all mistakes have been reviewed the session ends cleanly.
+     */
+    fun advanceMentorSession() {
+        val nextIdx = _uiState.value.mentorSessionIdx + 1
+        val queue   = _uiState.value.mentorSessionQueue
+        if (nextIdx < queue.size) {
+            _uiState.update { it.copy(mentorSessionIdx = nextIdx) }
+            enterMentorMode(targetMoveIndex = queue[nextIdx])
+        } else {
+            // Session complete — clear queue, then offer Board Scan Reflection if applicable
+            _uiState.update { it.copy(mentorSessionQueue = emptyList(), mentorSessionIdx = 0) }
+            val hasReflectionItems = _uiState.value.triggersByMove
+                .keys.any { it !in _uiState.value.triggersEngaged }
+            if (hasReflectionItems) enterReflectionMode() else exitMentorMode()
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PUBLIC — Post-move classification quiz
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Generates a 4-option shuffled classification quiz for the current guided-discovery
+     * position.  One option is the true [CriticalMoment.ReasonCategory]; the other three
+     * are randomly sampled from the remaining 7 categories.
+     * No-ops if the current critical moment is unknown.
+     */
+    fun triggerClassificationQuiz() {
+        val moment  = _uiState.value.guidedDiscoveryCriticalMoment ?: return
+        val correct = moment.toReason()
+        val options = buildClassificationOptions(correct)
+        val correctIdx = options.indexOfFirst { it.category == correct }
+        _uiState.update {
+            it.copy(
+                showClassificationQuiz      = true,
+                classificationOptions       = options,
+                classificationCorrectIndex  = correctIdx,
+                classificationSelectedIndex = -1,
+            )
+        }
+    }
+
+    /**
+     * Records the user's selected classification option.
+     * Appends the selected category label to the position annotation so it is stored.
+     */
+    fun selectClassificationOption(index: Int) {
+        val options = _uiState.value.classificationOptions
+        if (index !in options.indices) return
+        val selected = options[index]
+        _uiState.update { it.copy(classificationSelectedIndex = index) }
+        // Persist as a one-line annotation note
+        val fen = _uiState.value.boardState.fen
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing   = getCachedAnnotation(fen)
+            val prev       = existing?.moveComment?.takeIf { it.isNotBlank() }
+            val quizNote   = "🔖 My assessment: ${selected.label}"
+            val newComment = buildString {
+                if (prev != null) { appendLine(prev); appendLine() }
+                appendLine(quizNote)
+            }.trim()
+            val upd = (existing ?: PositionAnnotation(fen = fen)).copy(moveComment = newComment)
+            annotationDao.upsert(upd)
+            annotationCache[fen] = upd
+            _uiState.update { it.copy(currentComment = newComment) }
+            refreshTreeItems()
+        }
+    }
+
+    // ─── Private: classification option builder ───────────────────────────────
+
+    private fun buildClassificationOptions(
+        correct: CriticalMoment.ReasonCategory,
+    ): List<ClassificationOption> {
+        val allCategories = CriticalMoment.ReasonCategory.entries.toList()
+        val distractors = allCategories
+            .filter { it != correct }
+            .shuffled()
+            .take(3)
+        return (listOf(correct) + distractors)
+            .shuffled()
+            .map { cat ->
+                ClassificationOption(
+                    label       = categoryLabel(cat),
+                    description = categoryDescription(cat),
+                    category    = cat,
+                )
+            }
+    }
+
+    private fun categoryLabel(cat: CriticalMoment.ReasonCategory) = when (cat) {
+        CriticalMoment.ReasonCategory.MISSED_TACTIC    -> "Missed a tactical pattern"
+        CriticalMoment.ReasonCategory.HANGING_PIECE    -> "Left a piece undefended"
+        CriticalMoment.ReasonCategory.KING_SAFETY      -> "King safety neglected"
+        CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "Opening principle violated"
+        CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "Endgame technique error"
+        CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE -> "Strategic / positional error"
+        CriticalMoment.ReasonCategory.TIME_PRESSURE    -> "Rushed under time pressure"
+        CriticalMoment.ReasonCategory.MISSED_WIN       -> "Missed a winning resource"
+    }
+
+    private fun categoryDescription(cat: CriticalMoment.ReasonCategory) = when (cat) {
+        CriticalMoment.ReasonCategory.MISSED_TACTIC    -> "Fork, pin, skewer or other combination"
+        CriticalMoment.ReasonCategory.HANGING_PIECE    -> "Undefended material left en prise"
+        CriticalMoment.ReasonCategory.KING_SAFETY      -> "Attack on the king went unnoticed"
+        CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "Development or opening-rule breach"
+        CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "Incorrect endgame technique"
+        CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE -> "Long-term positional weakness created"
+        CriticalMoment.ReasonCategory.TIME_PRESSURE    -> "Move played too quickly"
+        CriticalMoment.ReasonCategory.MISSED_WIN       -> "Decisive resource or mate was available"
+    }
+
+    // ─── Private: player-side helper ──────────────────────────────────────────
+
+    /**
+     * Returns true if the move at [moveIndex] was played by the user.
+     *
+     * White plays odd-indexed moves (1, 3, 5…), Black plays even-indexed moves (2, 4, 6…).
+     * When [playerSideKnown] is false (no username set), all moves are treated as the user's
+     * so no mistakes are silently hidden.
+     */
+    private fun isUserMove(moveIndex: Int): Boolean {
+        if (!playerSideKnown) return true          // side unknown — include all
+        val isBlackMove = moveIndex % 2 == 0
+        return boardFlippedForBlack == isBlackMove // true only for the user's own moves
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -620,7 +1562,7 @@ class AnalysisViewModel(
                 blunderReflectionMode = false,
                 reviewMode     = ReviewMode.ANALYSE,
                 analyseSubMode = AnalyseSubMode.EXPLORE,
-                boardState     = it.boardState.copy(isEditorMode = true),
+                boardState     = it.boardState.copy(isEditorMode = false),
             )
         }
     }
@@ -701,12 +1643,31 @@ class AnalysisViewModel(
     // PRIVATE — Core
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /** Cached board-flip flag — set once during loadGame and preserved across navigation. */
+    private var boardFlippedForBlack: Boolean = false
+    /** True when the username setting matched a player name — meaning we know which side the user played. */
+    private var playerSideKnown: Boolean = false
+
     private fun loadGame() {
         viewModelScope.launch(Dispatchers.IO) {
             val game = repo.findById(gameId) ?: run {
                 Log.e(TAG, "loadGame: game $gameId NOT FOUND in DB"); return@launch
             }
             Log.d(TAG, "loadGame: found game '${game.whitePlayer} vs ${game.blackPlayer}' movesUci.length=${game.movesUci.length} pgn.length=${game.pgn.length}")
+
+            // ── Settings ──────────────────────────────────────────────────────
+            val positionCoachEnabled = settingsRepo.positionCoachEnabled.first()
+            _uiState.update { it.copy(positionCoachEnabled = positionCoachEnabled) }
+
+            // ── Board orientation — flip when the user played as Black ─────────
+            val username = settingsRepo.username.first().trim()
+            boardFlippedForBlack = username.isNotEmpty() &&
+                game.blackPlayer.equals(username, ignoreCase = true) &&
+                !game.whitePlayer.equals(username, ignoreCase = true)
+            playerSideKnown = username.isNotEmpty() &&
+                (game.whitePlayer.equals(username, ignoreCase = true) ||
+                 game.blackPlayer.equals(username, ignoreCase = true))
+            Log.d(TAG, "loadGame: username='$username' flippedForBlack=$boardFlippedForBlack playerSideKnown=$playerSideKnown")
 
             // If movesUci is blank the game was imported before the PGN-comment-stripping
             // fix landed.  Re-parse on the fly from the stored raw PGN so the user doesn't
@@ -732,6 +1693,10 @@ class AnalysisViewModel(
 
             val storedMoments = criticalMomentDao.getByGameId(gameId)
             val openingEntry  = runCatching { opening.classifyByMoves(uciMoves.take(20)) }.getOrNull()
+            val deviation     = withContext(Dispatchers.Default) {
+                runCatching { deviationAnalyzer.analyze(uciMoves, sanMoves) }.getOrNull()
+            }
+            Log.d(TAG, "loadGame: openingDeviation=$deviation")
 
             _uiState.update {
                 it.copy(
@@ -740,6 +1705,7 @@ class AnalysisViewModel(
                     openingSummary  = openingEntry?.let { e -> "${e.eco} · ${e.name}" } ?: "",
                     phaseSummary    = buildPhaseSummary(),
                     criticalMoments = storedMoments,
+                    openingDeviation = deviation,
                 )
             }
             applyMoveIndex(0)
@@ -784,19 +1750,30 @@ class AnalysisViewModel(
         // Truth-map eval for this position (White-perspective centipawns)
         val evalCp     = truthMap.find { it.moveIndex == index }?.evalCp
 
+        // Proactive trigger for this position (first trigger in the list if any)
+        val positionTrigger = _uiState.value.triggersByMove[index]?.firstOrNull()
+
+        // Opening deviation panel — show automatically when user arrives at the deviation move
+        val shouldShowDeviationPanel =
+            live.reviewMode == ReviewMode.NAVIGATE &&
+            !live.openingDeviationDismissed &&
+            live.openingDeviation?.moveIndex == index &&
+            index > 0
+
         _uiState.update { s ->
             s.copy(
                 moveIndex  = index,
                 boardState = s.boardState.copy(
-                    fen            = fen,
-                    lastMove       = lastMove,
-                    selectedSquare = null,
-                    legalMoves     = emptyList(),
-                    userArrows     = arrows,
-                    markedSquares  = marks,
-                    arrows         = emptyList(),
-                    isEditorMode   = inEditMode,
-                    showingFlash   = false,
+                    fen              = fen,
+                    lastMove         = lastMove,
+                    selectedSquare   = null,
+                    legalMoves       = emptyList(),
+                    userArrows       = arrows,
+                    markedSquares    = marks,
+                    arrows           = emptyList(),
+                    isEditorMode     = inEditMode,
+                    showingFlash     = false,
+                    flippedForBlack  = boardFlippedForBlack,
                 ),
                 currentComment         = comment,
                 hasAnnotationAtCurrent = comment.isNotBlank() || arrows.isNotEmpty() || marks.isNotEmpty(),
@@ -804,16 +1781,45 @@ class AnalysisViewModel(
                 blunderGuardActive     = false,
                 mentorAvailable        = computeMentorAvailable(index),
                 currentEvalCp          = evalCp,
+                showOpeningDeviationPanel = shouldShowDeviationPanel,
+                // Dismiss any open coaching panel when navigating; the lamp icon
+                // will re-light if the new position also has triggers.
+                showProactiveCoaching    = false,
+                activeProactiveTrigger   = null,
+                proactiveInteractiveMode = false,
+                proactiveAnswerFeedback  = null,
+                proactiveAnswerIsCorrect = null,
+                coachHighlightSquares    = emptyList(),
+                proactiveHangingSquares     = emptyList(),
+                proactiveHangingOwnSquares  = emptySet(),
+                proactiveFoundSquares       = emptySet(),
             )
         }
         Log.d(TAG, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")
+
+        // Keep engine-toggle overlays in sync when navigating in Analyse mode
+        val updated = _uiState.value
+        if (updated.reviewMode == ReviewMode.ANALYSE) {
+            if (updated.evalBarVisible && evalCp == null) {
+                // Truth map has no entry for this position — fetch eval on demand
+                viewModelScope.launch(Dispatchers.Default) { fetchOnDemandEval(fen) }
+            }
+            if (updated.bestMoveVisible) {
+                // Always refresh the best-move arrow for the new position
+                viewModelScope.launch(Dispatchers.Default) { fetchOnDemandBestMove(fen) }
+            }
+        }
     }
 
-    /** True when there is an engine-marked critical moment at this move index. */
+    /**
+     * Mentor is available at any non-starting position once a game is loaded.
+     *
+     * When a critical moment exists for this index the panel shows targeted questions;
+     * otherwise it falls back to a general strategic-reflection insight.
+     * This ensures the coach is always reachable — not just at engine-flagged moves.
+     */
     private fun computeMentorAvailable(index: Int): Boolean {
-        return _uiState.value.criticalMoments.any {
-            it.moveIndex == index && it.type == CriticalMoment.Type.ENGINE_MARKED.name
-        }
+        return index > 0 && uciMoves.isNotEmpty()
     }
 
     private fun buildTreeItems(currentIndex: Int): List<TreeDisplayItem> {
@@ -872,7 +1878,45 @@ class AnalysisViewModel(
                         )
                     }
                 }
-                _uiState.update { it.copy(isBackgroundAnalysisDone = true, backgroundAnalysisProgress = 1f) }
+                // Re-evaluate coaching triggers from stored evaluations so that the latest
+                // detection logic (including exchange-aware hanging-piece checks) is always
+                // applied — stored coachingTriggers strings from earlier app versions may
+                // contain false positives that the current evaluator would correctly suppress.
+                val mastered = masteryRepo.getMasteredTypes()
+                val moveTimes = moveTimeDao.getByGameId(gameId).associateBy { it.moveIndex }
+                val allTriggers = withContext(Dispatchers.Default) {
+                    CoachingTriggerEvaluator.evaluate(
+                        evaluations    = dbEvals,
+                        fenByMoveIndex = { idx -> fenSequence.getOrElse(idx) { "" } },
+                        timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
+                        playerIsWhite  = !boardFlippedForBlack,
+                    )
+                }
+                Log.d(TAG, "CoachTrigger (DB restore re-eval): ${allTriggers.values.sumOf { it.size }} triggers across ${allTriggers.size} positions  mastered=$mastered")
+                val restoredTriggers: Map<Int, List<CoachingTrigger>> = allTriggers
+                    .mapValues { (_, triggers) -> triggers.filter { it.typeName() !in mastered } }
+                    .filter { (_, triggers) -> triggers.isNotEmpty() }
+                Log.d(TAG, "CoachTrigger (DB restore): restoredTriggers.size=${restoredTriggers.size}  keys=${restoredTriggers.keys.take(10)}")
+
+                // Run highlights against the restored truth map (moveTimes already fetched above)
+                val highlights = GameHighlightEngine.run(
+                    truthMap    = truthMap,
+                    sanMoves    = sanMoves,
+                    fenSequence = fenSequence,
+                    moveTimes   = moveTimes,
+                )
+                _uiState.update {
+                    it.copy(
+                        isBackgroundAnalysisDone   = true,
+                        backgroundAnalysisProgress = 1f,
+                        gameHighlights             = highlights,
+                        triggersByMove             = restoredTriggers,
+                    )
+                }
+                // Check if the user already navigated past unreviewed critical moments
+                // before the analysis data became available.
+                val currentIdx = _uiState.value.moveIndex
+                if (currentIdx > 0) checkMissedMoments(0, currentIdx)
             }
             return
         }
@@ -897,13 +1941,47 @@ class AnalysisViewModel(
                 launch(Dispatchers.IO) { gameEvaluationDao.insertAll(evaluations) }
             }
 
-            val moments = map.filter { it.isCritical || it.hasTacticalMotif }.map { entry ->
+            // Fetch move-time data (already persisted during import) for impulse-control detection
+            val moveTimes = withContext(Dispatchers.IO) {
+                moveTimeDao.getByGameId(gameId).associateBy { it.moveIndex }
+            }
+
+            // Detect proactive coaching triggers from the fresh truth map
+            val allTriggers = CoachingTriggerEvaluator.evaluate(
+                evaluations     = evaluations,
+                fenByMoveIndex  = { idx -> fenSequence.getOrElse(idx) { "" } },
+                timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
+                playerIsWhite   = !boardFlippedForBlack,
+            )
+            Log.d(TAG, "CoachTrigger: ${allTriggers.values.sumOf { it.size }} raw triggers across ${allTriggers.size} positions — by type: ${allTriggers.values.flatten().groupBy { it.typeName() }.mapValues { it.value.size }}")
+            Log.d(TAG, "CoachTrigger: fenSequence.size=${fenSequence.size}  evaluations.size=${evaluations.size}  sampleEvalDeltas=${evaluations.take(5).map { it.evalDelta }}  sampleMotifs=${evaluations.take(5).map { it.motif }}")
+
+            // Filter out trigger types the user has already mastered
+            val masteredTypes  = masteryRepo.getMasteredTypes()
+            Log.d(TAG, "CoachTrigger: masteredTypes=$masteredTypes")
+            val triggerMap     = allTriggers.mapValues { (_, triggers) ->
+                triggers.filter { it.typeName() !in masteredTypes }
+            }.filter { (_, triggers) -> triggers.isNotEmpty() }
+            Log.d(TAG, "CoachTrigger: after mastery filter — ${triggerMap.size} positions remain, keys=${triggerMap.keys.take(10)}")
+
+            _uiState.update { it.copy(triggersByMove = triggerMap) }
+            // Persist the full (unfiltered) trigger data for future sessions
+            if (allTriggers.isNotEmpty()) {
+                launch(Dispatchers.IO) {
+                    allTriggers.forEach { (moveIndex, triggers) ->
+                        val encoded = triggers.joinToString(",") { it.typeName() }
+                        gameEvaluationDao.updateTriggers(gameId, moveIndex, encoded)
+                    }
+                }
+            }
+
+            val moments = map.filter { it.isCritical || it.isSignificantTacticalMiss }.map { entry ->
                 CriticalMoment(
                     gameId           = gameId,
                     moveIndex        = entry.moveIndex,
                     type             = CriticalMoment.Type.ENGINE_MARKED.name,
                     severity         = kotlin.math.abs(entry.playerEvalDelta),
-                    reasonCategory   = motifToReason(entry.motif),
+                    reasonCategory   = motifToReason(entry),
                     explanationState = CriticalMoment.ExplanationState.HIDDEN.name,
                     fen              = entry.fen,
                 )
@@ -912,13 +1990,25 @@ class AnalysisViewModel(
                 launch(Dispatchers.IO) { criticalMomentDao.insertAll(moments) }
             }
 
+            // Run highlight rules against the completed truth map (moveTimes already fetched above)
+            val highlights = GameHighlightEngine.run(
+                truthMap    = map,
+                sanMoves    = sanMoves,
+                fenSequence = fenSequence,
+                moveTimes   = moveTimes,
+            )
+
             _uiState.update {
                 it.copy(
                     isBackgroundAnalysisDone   = true,
                     backgroundAnalysisProgress = 1f,
                     criticalMoments            = criticalMomentDao.getByGameId(gameId),
+                    gameHighlights             = highlights,
                 )
             }
+            // Check if the user navigated past unreviewed critical positions while analysis ran
+            val currentIdx = _uiState.value.moveIndex
+            if (currentIdx > 0) checkMissedMoments(0, currentIdx)
         }
     }
 
@@ -928,7 +2018,7 @@ class AnalysisViewModel(
         if (truthMap.isEmpty() && _uiState.value.criticalMoments.isEmpty()) return
 
         val criticalIndices = if (truthMap.isNotEmpty()) {
-            truthMap.filter { it.isCritical || it.hasTacticalMotif }.map { it.moveIndex }.toSet()
+            truthMap.filter { it.isCritical || it.isSignificantTacticalMiss }.map { it.moveIndex }.toSet()
         } else {
             _uiState.value.criticalMoments
                 .filter { it.type == CriticalMoment.Type.ENGINE_MARKED.name }
@@ -937,18 +2027,37 @@ class AnalysisViewModel(
 
         for (idx in (fromIndex + 1)..toIndex) {
             if (idx !in criticalIndices) continue
+            // Only show the banner for moves the USER played, not opponent's blunders.
+            if (!isUserMove(idx)) continue
             val fen     = fenSequence.getOrElse(idx) { continue }
             val annot   = getCachedAnnotation(fen)
             val reviewed = (annot?.moveComment?.isNotBlank() == true) ||
                 (annot?.arrowsJson?.length ?: 0) > 2
             if (!reviewed) {
+                val category = getCategoryForMove(idx)
+                val lastAt   = _uiState.value.shownCategoryAtMove[category]
+                if (lastAt != null && idx - lastAt <= CATEGORY_COOLDOWN_MOVES) continue
                 _uiState.update {
-                    it.copy(showMissedMomentBanner = true, missedMomentMoveIndex = idx)
+                    it.copy(
+                        showMissedMomentBanner = true,
+                        missedMomentMoveIndex  = idx,
+                        shownCategoryAtMove    = it.shownCategoryAtMove + (category to idx),
+                    )
                 }
                 return
             }
         }
     }
+
+    private fun getCategoryForMove(idx: Int): String =
+        if (truthMap.isNotEmpty())
+            truthMap.firstOrNull { it.moveIndex == idx }
+                ?.let { motifToReason(it) }
+                ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
+        else
+            _uiState.value.criticalMoments
+                .firstOrNull { it.moveIndex == idx }?.reasonCategory
+                ?: CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
 
     // ─── Sandbox: attempt move + async blunder check ──────────────────────────
 
@@ -1058,6 +2167,54 @@ class AnalysisViewModel(
         }
     }
 
+    // ─── On-demand engine helpers (eval bar / best move) ─────────────────────
+
+    /**
+     * Runs engine analysis for [fen] and updates [AnalysisUiState.currentEvalCp].
+     * No-ops if the user has already navigated away or toggled off the eval bar.
+     */
+    private suspend fun fetchOnDemandEval(fen: String) {
+        val result = runCatching {
+            engine.analyzePosition(fen, depth = ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+        }.getOrNull() ?: run {
+            Log.w(TAG, "fetchOnDemandEval: engine returned null for fen=${fen.take(40)}")
+            return
+        }
+        val board  = Board().apply { loadFromFen(fen) }
+        val evalCp = result.toWhitePerspective(board)
+        // Guard: only apply if the user is still on the same position
+        if (_uiState.value.boardState.fen == fen && _uiState.value.evalBarVisible) {
+            _uiState.update { it.copy(currentEvalCp = evalCp) }
+        }
+    }
+
+    /**
+     * Runs engine analysis for [fen] and draws the best-move as a green arrow.
+     * No-ops if the user has navigated away or toggled off the best-move overlay.
+     */
+    private suspend fun fetchOnDemandBestMove(fen: String) {
+        val result = runCatching {
+            engine.analyzePosition(fen, depth = 10)
+        }.getOrNull() ?: run {
+            Log.w(TAG, "fetchOnDemandBestMove: engine returned null for fen=${fen.take(40)}")
+            return
+        }
+        val arrow = result.toArrow()
+        // Guard: only apply if the user is still on the same position
+        if (_uiState.value.boardState.fen == fen && _uiState.value.bestMoveVisible) {
+            _uiState.update { s ->
+                s.copy(
+                    boardState = s.boardState.copy(
+                        arrows = if (arrow != null) listOf(arrow) else emptyList(),
+                    ),
+                )
+            }
+            if (arrow == null) {
+                Log.w(TAG, "fetchOnDemandBestMove: no valid arrow for fen=${fen.take(40)} bestMove='${result.bestMoveUci}'")
+            }
+        }
+    }
+
     // ─── Annotation persistence ───────────────────────────────────────────────
 
     private fun persistAnnotation(boardState: BoardState) {
@@ -1129,11 +2286,42 @@ class AnalysisViewModel(
         }
     }
 
-    private fun motifToReason(motif: String) = when (motif) {
-        "checkmate" -> CriticalMoment.ReasonCategory.MISSED_WIN.name
-        "hanging"   -> CriticalMoment.ReasonCategory.HANGING_PIECE.name
-        "fork"      -> CriticalMoment.ReasonCategory.MISSED_TACTIC.name
-        else        -> CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
+    /**
+     * Maps a [TruthMapEntry] to the most appropriate [CriticalMoment.ReasonCategory].
+     *
+     * Priority order:
+     * 1. Tactical motifs from [MotifClassifier] — highest confidence.
+     * 2. Opening phase heuristic (moveIndex ≤ 20 half-moves ≈ first 10 moves each side).
+     * 3. Endgame detection from FEN material count (no queens + ≤ 4 minor/rook pieces).
+     * 4. Severe positional collapse (≥ 4 pawns lost in a single move) → missed winning chance.
+     * 5. Default: STRATEGIC_MISTAKE.
+     */
+    private fun motifToReason(entry: TruthMapEntry): String = when {
+        entry.motif == "checkmate"              -> CriticalMoment.ReasonCategory.MISSED_WIN.name
+        entry.motif == "hanging"                -> CriticalMoment.ReasonCategory.HANGING_PIECE.name
+        entry.motif == "fork"                   -> CriticalMoment.ReasonCategory.MISSED_TACTIC.name
+        // Opening phase — first 20 half-moves (roughly moves 1–10 per side)
+        entry.moveIndex <= 20                   -> CriticalMoment.ReasonCategory.OPENING_DEVIATION.name
+        // Endgame: no queens remaining and combined major+minor material ≤ 4 pieces
+        isEndgamePosition(entry.fen)            -> CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE.name
+        // Blunder that swings ≥ 4 pawns in a single move — likely a decisive resource was missed
+        entry.playerEvalDelta <= -400           -> CriticalMoment.ReasonCategory.MISSED_WIN.name
+        else                                    -> CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE.name
+    }
+
+    /**
+     * Returns true when the position represented by [fen] is an endgame:
+     * both queens are gone **and** the total minor + rook count ≤ 4.
+     *
+     * Intentionally uses simple character counting on the piece-placement field
+     * to avoid constructing a full [com.github.bhlangonijr.chesslib.Board] object.
+     */
+    private fun isEndgamePosition(fen: String): Boolean {
+        val placement = fen.substringBefore(' ')
+        val queens    = placement.count { it == 'Q' || it == 'q' }
+        val rooks     = placement.count { it == 'R' || it == 'r' }
+        val minors    = placement.count { it in "BbNn" }
+        return queens == 0 && (rooks + minors) <= 4
     }
 }
 
