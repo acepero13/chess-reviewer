@@ -275,6 +275,22 @@ data class AnalysisUiState(
     val showOpeningDeviationPanel: Boolean = false,
     /** True once the user has dismissed the panel — prevents it re-appearing on re-navigation. */
     val openingDeviationDismissed: Boolean = false,
+
+    // ── Endgame Recognition Coach ─────────────────────────────────────────────
+    /** First recognised endgame type in this game, null if no known endgame was reached. */
+    val endgameClassification: com.acepero13.android.gamereviewer.domain.EndgameClassification? = null,
+    /** True while the EndgameRecognitionPanel is shown (user navigated to the endgame start move). */
+    val showEndgameRecognitionPanel: Boolean = false,
+    /** True once the user has dismissed the panel — prevents it re-appearing on re-navigation. */
+    val endgamePanelDismissed: Boolean = false,
+
+    // ── Middlegame Plan Coach ─────────────────────────────────────────────────
+    /** Detected pawn structure plans at the start of the middlegame, null if none found. */
+    val middlegamePlanClassification: com.acepero13.android.gamereviewer.domain.MiddlegamePlanClassification? = null,
+    /** True while the MiddlegamePlanPanel is shown (user navigated to the detected middlegame move). */
+    val showMiddlegamePlanPanel: Boolean = false,
+    /** True once the user has dismissed the panel — prevents it re-appearing on re-navigation. */
+    val middlegamePlanPanelDismissed: Boolean = false,
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -289,12 +305,15 @@ class AnalysisViewModel(
     private val criticalMomentDao: CriticalMomentDao,
     private val gameEvaluationDao: GameEvaluationDao,
     private val moveTimeDao: MoveTimeDao,
+    private val endgameEncounterDao: com.acepero13.android.gamereviewer.data.db.EndgameEncounterDao,
     private val engine: StockfishEngine,
     private val opening: OpeningClassifier,
     private val truthMapBuilder: TruthMapBuilder,
     private val settingsRepo: SettingsRepository,
     private val masteryRepo: TriggerMasteryRepository,
     private val deviationAnalyzer: OpeningDeviationAnalyzer,
+    private val endgameRecognizer: com.acepero13.android.gamereviewer.domain.EndgameRecognizer,
+    private val middlegamePlanDetector: com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AnalysisUiState())
@@ -484,6 +503,14 @@ class AnalysisViewModel(
 
     fun dismissOpeningDeviationPanel() {
         _uiState.update { it.copy(showOpeningDeviationPanel = false, openingDeviationDismissed = true) }
+    }
+
+    fun dismissEndgameRecognitionPanel() {
+        _uiState.update { it.copy(showEndgameRecognitionPanel = false, endgamePanelDismissed = true) }
+    }
+
+    fun dismissMiddlegamePlanPanel() {
+        _uiState.update { it.copy(showMiddlegamePlanPanel = false, middlegamePlanPanelDismissed = true) }
     }
 
     /**
@@ -1698,14 +1725,48 @@ class AnalysisViewModel(
             }
             Log.d(TAG, "loadGame: openingDeviation=$deviation")
 
+            val endgameClassification = withContext(Dispatchers.Default) {
+                runCatching { endgameRecognizer.analyze(fenSequence) }.getOrNull()
+            }
+            Log.d(TAG, "loadGame: endgameClassification=$endgameClassification")
+            endgameClassification?.let { ec ->
+                val existing = endgameEncounterDao.getByGameId(gameId)
+                if (existing == null) {
+                    endgameEncounterDao.upsert(
+                        com.acepero13.android.gamereviewer.data.model.EndgameEncounter(
+                            gameId    = gameId,
+                            moveIndex = ec.firstEndgameMoveIndex,
+                            chapter   = ec.entry.chapter,
+                            category  = ec.entry.category,
+                            name      = ec.entry.name,
+                            fen       = ec.fen,
+                        )
+                    )
+                }
+            }
+
+            val middlegamePlanClassification = withContext(Dispatchers.Default) {
+                val startIndex = (deviation?.moveIndex ?: 20).coerceIn(fenSequence.indices)
+                runCatching {
+                    middlegamePlanDetector.detect(
+                        fens           = fenSequence,
+                        playerIsWhite  = !boardFlippedForBlack,
+                        startFromIndex = startIndex,
+                    )
+                }.getOrNull()
+            }
+            Log.d(TAG, "loadGame: middlegamePlanClassification=$middlegamePlanClassification")
+
             _uiState.update {
                 it.copy(
-                    game            = game,
-                    totalMoves      = uciMoves.size,
-                    openingSummary  = openingEntry?.let { e -> "${e.eco} · ${e.name}" } ?: "",
-                    phaseSummary    = buildPhaseSummary(),
-                    criticalMoments = storedMoments,
-                    openingDeviation = deviation,
+                    game                         = game,
+                    totalMoves                   = uciMoves.size,
+                    openingSummary               = openingEntry?.let { e -> "${e.eco} · ${e.name}" } ?: "",
+                    phaseSummary                 = buildPhaseSummary(),
+                    criticalMoments              = storedMoments,
+                    openingDeviation             = deviation,
+                    endgameClassification        = endgameClassification,
+                    middlegamePlanClassification = middlegamePlanClassification,
                 )
             }
             applyMoveIndex(0)
@@ -1760,6 +1821,21 @@ class AnalysisViewModel(
             live.openingDeviation?.moveIndex == index &&
             index > 0
 
+        // Endgame recognition panel — show when user arrives at the first endgame move
+        val shouldShowEndgamePanel =
+            live.reviewMode == ReviewMode.NAVIGATE &&
+            !live.endgamePanelDismissed &&
+            live.endgameClassification?.firstEndgameMoveIndex == index &&
+            index > 0
+
+        // Middlegame plan panel — show at the detected middlegame start move
+        val shouldShowMiddlegamePanel =
+            live.reviewMode == ReviewMode.NAVIGATE &&
+            !live.middlegamePlanPanelDismissed &&
+            !shouldShowDeviationPanel &&
+            live.middlegamePlanClassification?.moveIndex == index &&
+            index > 0
+
         _uiState.update { s ->
             s.copy(
                 moveIndex  = index,
@@ -1781,7 +1857,9 @@ class AnalysisViewModel(
                 blunderGuardActive     = false,
                 mentorAvailable        = computeMentorAvailable(index),
                 currentEvalCp          = evalCp,
-                showOpeningDeviationPanel = shouldShowDeviationPanel,
+                showOpeningDeviationPanel    = shouldShowDeviationPanel,
+                showEndgameRecognitionPanel  = shouldShowEndgamePanel,
+                showMiddlegamePlanPanel      = shouldShowMiddlegamePanel,
                 // Dismiss any open coaching panel when navigating; the lamp icon
                 // will re-light if the new position also has triggers.
                 showProactiveCoaching    = false,
@@ -1987,7 +2065,15 @@ class AnalysisViewModel(
                 )
             }
             if (moments.isNotEmpty()) {
-                launch(Dispatchers.IO) { criticalMomentDao.insertAll(moments) }
+                launch(Dispatchers.IO) {
+                    criticalMomentDao.insertAll(moments)
+                    val hasEndgameMistake = moments.any {
+                        it.reasonCategory == com.acepero13.android.gamereviewer.data.model.CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE.name
+                    }
+                    if (hasEndgameMistake) {
+                        endgameEncounterDao.markMistake(gameId)
+                    }
+                }
             }
 
             // Run highlight rules against the completed truth map (moveTimes already fetched above)

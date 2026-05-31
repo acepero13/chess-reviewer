@@ -2,16 +2,20 @@ package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
+import com.acepero13.android.gamereviewer.domain.GameNarrativeSummary
 import com.acepero13.android.gamereviewer.domain.TimeAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -31,6 +35,8 @@ data class GameReportUiState(
     val avgTimeOnGoodMoves: Float = 0f,
     val hasTimeData: Boolean = false,
 
+    val narrative: GameNarrativeSummary.Summary? = null,
+
     val error: String? = null,
 )
 
@@ -45,6 +51,8 @@ class GameReportViewModel(
     private val repo: GameRepository,
     private val evalDao: GameEvaluationDao,
     private val moveTimeDao: MoveTimeDao,
+    private val criticalMomentDao: CriticalMomentDao,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GameReportUiState())
@@ -55,13 +63,18 @@ class GameReportViewModel(
     private fun loadReport() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val game   = repo.findById(gameId)
-                val evals  = evalDao.getByGameId(gameId)
-                val times  = moveTimeDao.getByGameId(gameId)
+                val game    = repo.findById(gameId)
+                val evals   = evalDao.getByGameId(gameId)
+                val times   = moveTimeDao.getByGameId(gameId)
+                val moments = criticalMomentDao.getByGameId(gameId)
+                val username = settingsRepo.username.firstOrNull() ?: ""
                 val decisions = TimeAnalyzer.analyze(evals, times)
 
                 val title  = game?.let { "${it.whitePlayer} vs ${it.blackPlayer}" } ?: "Game #$gameId"
                 val blunders = decisions.count { it.isBlunder }
+                val narrative = game?.let {
+                    GameNarrativeSummary.build(it, moments, username)
+                }
 
                 _uiState.update {
                     it.copy(
@@ -77,6 +90,7 @@ class GameReportViewModel(
                         avgTimeOnBlunders  = TimeAnalyzer.avgTimeOnBlunders(decisions),
                         avgTimeOnGoodMoves = TimeAnalyzer.avgTimeOnGoodMoves(decisions),
                         hasTimeData     = times.isNotEmpty(),
+                        narrative       = narrative,
                     )
                 }
             } catch (e: Exception) {

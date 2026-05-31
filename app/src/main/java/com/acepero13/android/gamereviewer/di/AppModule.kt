@@ -5,8 +5,12 @@ import com.acepero13.android.gamereviewer.data.db.AppDatabase
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
+import com.acepero13.android.gamereviewer.domain.EndgameRecognizer
+import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
 import com.acepero13.android.gamereviewer.domain.OpeningDeviationAnalyzer
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
+import com.acepero13.chess.core.endgame.EndgameClassifier
+import com.acepero13.chess.core.middlegame.MiddlegamePlanClassifier
 import com.acepero13.android.gamereviewer.ui.screens.AnalysisViewModel
 import com.acepero13.android.gamereviewer.ui.screens.DashboardViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
@@ -33,7 +37,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -42,6 +46,7 @@ val appModule = module {
     single { get<AppDatabase>().criticalMomentDao() }
     single { get<AppDatabase>().gameEvaluationDao() }
     single { get<AppDatabase>().moveTimeDao() }
+    single { get<AppDatabase>().endgameEncounterDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -56,6 +61,10 @@ val appModule = module {
     // ── Domain layer ──────────────────────────────────────────────────────────
     single { TruthMapBuilder(get()) }
     single { OpeningDeviationAnalyzer(get()) }
+    single { EndgameClassifier() }
+    single { EndgameRecognizer(get()) }
+    single { MiddlegamePlanClassifier() }
+    single { MiddlegamePlanDetector(get()) }
 
     // ── ViewModels ────────────────────────────────────────────────────────────
     viewModel { HomeViewModel(get()) }
@@ -63,29 +72,34 @@ val appModule = module {
     viewModel { ImportViewModel(get(), get(), get(), get(), get()) }
     viewModel { (gameId: Long) ->
         AnalysisViewModel(
-            gameId            = gameId,
-            repo              = get(),
-            annotationDao     = get(),
-            criticalMomentDao = get(),
-            gameEvaluationDao = get(),
-            moveTimeDao       = get(),
-            engine            = get(),
-            opening           = get(),
-            truthMapBuilder   = get(),
-            settingsRepo      = get(),
-            masteryRepo       = get(),
-            deviationAnalyzer = get(),
+            gameId               = gameId,
+            repo                 = get(),
+            annotationDao        = get(),
+            criticalMomentDao    = get(),
+            gameEvaluationDao    = get(),
+            moveTimeDao          = get(),
+            endgameEncounterDao  = get(),
+            engine               = get(),
+            opening              = get(),
+            truthMapBuilder      = get(),
+            settingsRepo         = get(),
+            masteryRepo          = get(),
+            deviationAnalyzer       = get(),
+            endgameRecognizer       = get(),
+            middlegamePlanDetector  = get(),
         )
     }
     viewModel { (gameId: Long) ->
         GameReportViewModel(
-            gameId      = gameId,
-            repo        = get(),
-            evalDao     = get(),
-            moveTimeDao = get(),
+            gameId            = gameId,
+            repo              = get(),
+            evalDao           = get(),
+            moveTimeDao       = get(),
+            criticalMomentDao = get(),
+            settingsRepo      = get(),
         )
     }
-    viewModel { DashboardViewModel(get(), get(), get()) }
+    viewModel { DashboardViewModel(get(), get(), get(), get()) }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get()) }
     viewModel { (categoryNames: List<String>) ->

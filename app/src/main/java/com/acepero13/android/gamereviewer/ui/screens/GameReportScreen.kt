@@ -30,10 +30,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.acepero13.android.gamereviewer.domain.GameNarrativeSummary
 import com.acepero13.android.gamereviewer.ui.components.DecisionVelocityChart
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.WCDark
@@ -116,6 +118,9 @@ fun GameReportScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+
+            // ── Narrative summary ─────────────────────────────────────────────
+            state.narrative?.let { NarrativeSummaryCard(it) }
 
             // ── Decision Velocity chart ────────────────────────────────────────
             if (state.hasTimeData) {
@@ -281,6 +286,63 @@ private fun StatCell(
             maxLines  = 2,
             overflow  = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun NarrativeSummaryCard(summary: GameNarrativeSummary.Summary) {
+    val accentColor = when (summary.outcome) {
+        GameNarrativeSummary.Outcome.WIN     -> Color(0xFF4CAF50)
+        GameNarrativeSummary.Outcome.LOSS    -> Color(0xFFEF5350)
+        GameNarrativeSummary.Outcome.DRAW    -> ChessGold
+        GameNarrativeSummary.Outcome.UNKNOWN -> ChessGold
+    }
+    val outcomeEmoji = when (summary.outcome) {
+        GameNarrativeSummary.Outcome.WIN     -> "🏆"
+        GameNarrativeSummary.Outcome.LOSS    -> "📉"
+        GameNarrativeSummary.Outcome.DRAW    -> "🤝"
+        GameNarrativeSummary.Outcome.UNKNOWN -> "🔍"
+    }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "$outcomeEmoji Game Summary",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = accentColor,
+            )
+            Text(
+                summary.headline,
+                style      = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color      = MaterialTheme.colorScheme.onSurface,
+            )
+            if (summary.details.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    summary.details.forEach { detail ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment     = Alignment.Top,
+                        ) {
+                            Text("•", style = MaterialTheme.typography.bodySmall, color = accentColor)
+                            Text(
+                                detail,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

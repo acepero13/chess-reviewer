@@ -186,6 +186,55 @@ fun DashboardScreen(
                 }
             }
 
+            // ── Endgame weaknesses ─────────────────────────────────────────────
+            if (state.endgameWeaknesses.isNotEmpty()) {
+                Text(
+                    "Endgame Weaknesses",
+                    style      = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = ChessGold,
+                )
+                Text(
+                    "Endgame types where you made critical mistakes — study the corresponding chapters in 100 Endgames You Should Know.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                state.endgameWeaknesses.forEachIndexed { i, row ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Row(
+                            modifier            = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment   = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                text  = "${i + 1}",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = ChessGold,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text       = row.name,
+                                    style      = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text  = "Chapter ${row.chapter}  ·  ${row.gamesEncountered} game${if (row.gamesEncountered != 1) "s" else ""}, ${row.gamesWithMistake} with mistakes",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
         }
     }

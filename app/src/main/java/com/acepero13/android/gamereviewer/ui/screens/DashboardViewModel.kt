@@ -3,6 +3,7 @@ package com.acepero13.android.gamereviewer.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
+import com.acepero13.android.gamereviewer.data.db.EndgameEncounterDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
@@ -23,6 +24,15 @@ data class HabitMasteryRow(
     val mastered: Boolean,
 )
 
+/** Cross-game summary of one endgame chapter the player has struggled with. */
+data class EndgameWeaknessRow(
+    val chapter: Int,
+    val name: String,
+    val category: String,
+    val gamesEncountered: Int,
+    val gamesWithMistake: Int,
+)
+
 data class DashboardUiState(
     val isLoading: Boolean = true,
     val totalGamesImported: Int = 0,
@@ -31,6 +41,7 @@ data class DashboardUiState(
     val trends: List<BehavioralDiagnostic.FailureTrend> = emptyList(),
     val hasWishfulThinking: Boolean = false,
     val habitRows: List<HabitMasteryRow> = emptyList(),
+    val endgameWeaknesses: List<EndgameWeaknessRow> = emptyList(),
     val error: String? = null,
 )
 
@@ -44,6 +55,7 @@ class DashboardViewModel(
     private val repo: GameRepository,
     private val criticalMomentDao: CriticalMomentDao,
     private val masteryRepo: TriggerMasteryRepository,
+    private val endgameEncounterDao: EndgameEncounterDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -75,6 +87,22 @@ class DashboardViewModel(
                     )
                 }
 
+                val allEncounters = endgameEncounterDao.getAll()
+                val endgameWeaknesses = allEncounters
+                    .groupBy { it.chapter }
+                    .map { (chapter, rows) ->
+                        EndgameWeaknessRow(
+                            chapter          = chapter,
+                            name             = rows.first().name,
+                            category         = rows.first().category,
+                            gamesEncountered = rows.size,
+                            gamesWithMistake = rows.count { it.hadMistake },
+                        )
+                    }
+                    .filter { it.gamesWithMistake > 0 }
+                    .sortedByDescending { it.gamesWithMistake }
+                    .take(3)
+
                 _uiState.update {
                     it.copy(
                         isLoading              = false,
@@ -84,6 +112,7 @@ class DashboardViewModel(
                         trends                 = trends,
                         hasWishfulThinking     = wishful,
                         habitRows              = habitRows,
+                        endgameWeaknesses      = endgameWeaknesses,
                     )
                 }
             } catch (e: Exception) {

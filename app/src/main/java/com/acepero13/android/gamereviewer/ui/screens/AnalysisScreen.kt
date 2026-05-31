@@ -370,8 +370,38 @@ fun AnalysisScreen(
                             }
                         }
 
+                        // Endgame Recognition Coach panel — shown at the first endgame move
+                        if (state.showEndgameRecognitionPanel) {
+                            state.endgameClassification?.let { classification ->
+                                com.acepero13.android.gamereviewer.ui.components.EndgameRecognitionPanel(
+                                    classification = classification,
+                                    insight        = InsightReconciler.forEndgame(
+                                        chapter = classification.entry.chapter,
+                                        name    = classification.entry.name,
+                                    ),
+                                    onContinue     = vm::dismissEndgameRecognitionPanel,
+                                    modifier       = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+
+                        // Middlegame Plan Coach panel — shown at the first out-of-book move
+                        if (state.showMiddlegamePlanPanel) {
+                            state.middlegamePlanClassification?.let { classification ->
+                                val insights = classification.plans.map { plan ->
+                                    InsightReconciler.forMiddlegamePlan(plan)
+                                }
+                                com.acepero13.android.gamereviewer.ui.components.MiddlegamePlanPanel(
+                                    classification = classification,
+                                    insights       = insights,
+                                    onContinue     = vm::dismissMiddlegamePlanPanel,
+                                    modifier       = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+
                         // Proactive coaching panel (Board Scan triggers)
-                        if (!state.showOpeningDeviationPanel) {
+                        if (!state.showOpeningDeviationPanel && !state.showEndgameRecognitionPanel && !state.showMiddlegamePlanPanel) {
                             state.activeProactiveTrigger?.let { trigger ->
                                 ProactiveCoachingPanel(
                                     trigger                  = trigger,

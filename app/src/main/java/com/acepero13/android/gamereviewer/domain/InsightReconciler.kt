@@ -1,6 +1,8 @@
 package com.acepero13.android.gamereviewer.domain
 
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
+import com.acepero13.chess.core.middlegame.MiddlegamePlan
+import com.acepero13.chess.core.middlegame.PlanType
 
 /**
  * Generates targeted conceptual questions and hints for a given [CriticalMoment.ReasonCategory]
@@ -384,5 +386,128 @@ object InsightReconciler {
                     "If you cannot answer that, the move may be premature.",
             )
         }
+    }
+
+    /**
+     * Returns an [Insight] for a specific endgame type detected in the game, enriching
+     * the generic [ENDGAME_PRINCIPLE] insight with the exact chapter and endgame name
+     * from *100 Endgames You Should Know*.
+     */
+    fun forEndgame(chapter: Int, name: String): Insight {
+        val base = forReason(CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE)
+        return base.copy(
+            conceptualHint = "Chapter $chapter — $name\n\n${base.conceptualHint}",
+        )
+    }
+
+    // ── By middlegame pawn structure ──────────────────────────────────────────
+
+    fun forMiddlegamePlan(plan: MiddlegamePlan): Insight = when (plan.type) {
+
+        PlanType.IQP -> Insight(
+            emoji       = "♙",
+            title       = "Isolated Queen's Pawn",
+            description = "You have an IQP on d4/d5 — a pawn with no friendly neighbours on the c or e files. It creates dynamic counterplay but is a long-term structural weakness.",
+            questions   = listOf(
+                "Who controls e5 and c5? Can you place a knight on one of those outposts?",
+                "Should you trade pieces to reduce activity, or keep pieces on the board to maximise your attacking chances?",
+                "Is your opponent targeting the d-pawn directly with rooks or pieces?",
+            ),
+            conceptualHint = "The IQP creates dynamic counterplay — piece activity compensates for the structural weakness. " +
+                "Nimzowitsch's rule: blockade the IQP with a knight on d5. The IQP owner should avoid mass exchanges.",
+        )
+
+        PlanType.HANGING_PAWNS -> Insight(
+            emoji       = "⚠️",
+            title       = "Hanging Pawns",
+            description = "You have connected pawns on c and d with no friendly support on the adjacent b and e files — the 'hanging pawn' duo. Dynamic but potentially vulnerable.",
+            questions   = listOf(
+                "Are your c- and d-pawns acting as a strength (attacking wedge) or weakness (both targeted)?",
+                "Can you advance one pawn to create a passed pawn before your opponent organises a blockade?",
+                "Are your pieces coordinated to support a pawn advance?",
+            ),
+            conceptualHint = "Hanging pawns are dynamic — advance to create a passed pawn when your pieces are active. " +
+                "If under pressure, exchange one pawn to reach a stable IQP structure rather than letting both become targets.",
+        )
+
+        PlanType.PAWN_MAJORITY -> Insight(
+            emoji       = "⚖️",
+            title       = plan.title,
+            description = "You have more pawns than your opponent on one wing. A healthy majority creates a passed pawn in the endgame.",
+            questions   = listOf(
+                "Is your majority mobile, or are your pawns blocked by enemy pieces or pawns?",
+                "Can you exchange center pawns to activate the majority and create a passer?",
+                "Is your opponent organising a minority attack on the opposite wing to create weaknesses?",
+            ),
+            conceptualHint = "A healthy pawn majority converts to a passed pawn in the endgame. " +
+                "Avoid unnecessary pawn advances that self-block the majority. The plan: liquidate the center, then push.",
+        )
+
+        PlanType.OPEN_FILE -> Insight(
+            emoji       = "♜",
+            title       = plan.title,
+            description = "The ${plan.affectedFile}-file has no pawns — it is fully open. Heavy pieces belong here.",
+            questions   = listOf(
+                "Which rook benefits most from the ${plan.affectedFile}-file — the one closer to the action?",
+                "Can you double your rooks on this file to double the pressure?",
+                "Does the open file lead toward the opponent's king position or a weak back-rank square?",
+            ),
+            conceptualHint = "Rooks belong on open files. Place a rook first, then double — two rooks on an open file exert decisive pressure. " +
+                "Look for an outpost square or the 7th rank at the end of the open file.",
+        )
+
+        PlanType.HALF_OPEN_FILE -> Insight(
+            emoji       = "↕",
+            title       = plan.title,
+            description = "The ${plan.affectedFile}-file has an enemy pawn but no friendly pawn — a half-open file. Use it to pressure the enemy.",
+            questions   = listOf(
+                "What is the rook's target on this file — the enemy pawn, the seventh rank, or the king?",
+                "Can a pawn break open the file further and convert it to a fully open file?",
+                "Is the enemy pawn on this file defended? If not, it's a direct target.",
+            ),
+            conceptualHint = "A rook on a half-open file pressures the enemy pawn and prevents it from advancing. " +
+                "Long-term goal: win or trade the blocking pawn to convert the half-open file to a fully open one.",
+        )
+
+        PlanType.DOUBLED_PAWNS -> Insight(
+            emoji       = "⬆",
+            title       = plan.title,
+            description = "You have two pawns on the ${plan.affectedFile}-file. Doubled pawns reduce mobility but often open adjacent files.",
+            questions   = listOf(
+                "Which open or half-open file did your doubled pawns create — can you use it?",
+                "Are the doubled pawns a static long-term weakness or a dynamic short-term asset?",
+                "Can you use the open file aggressively enough to justify the structural cost?",
+            ),
+            conceptualHint = "Doubled pawns are not always a weakness — they control squares and open adjacent files. " +
+                "Key question: do your pieces compensate for the reduced pawn mobility? Use the open file aggressively.",
+        )
+
+        PlanType.BACKWARD_PAWN -> Insight(
+            emoji       = "🎯",
+            title       = plan.title,
+            description = "The ${plan.affectedFile}-pawn cannot advance safely and is behind its neighbours — a backward pawn. It is a long-term structural target.",
+            questions   = listOf(
+                "Can your opponent place a piece on the square directly in front of the backward pawn as a permanent outpost?",
+                "Can you advance or trade off the backward pawn before it becomes permanently fixed?",
+                "Is the square in front of the backward pawn a strong outpost for the opponent's knight?",
+            ),
+            conceptualHint = "A backward pawn on an open file is a classic long-term weakness. " +
+                "Target it with rooks, prevent its advance, and use the square in front as a knight outpost. " +
+                "The defender must keep it active with piece play to avoid slow suffocation.",
+        )
+
+        PlanType.PAWN_CHAIN -> Insight(
+            emoji       = "🔗",
+            title       = "Pawn Chain",
+            description = "You have a diagonal chain of connected pawns. The chain controls space but has a vulnerable base.",
+            questions   = listOf(
+                "Where is the base of the chain — which pawn, if captured, unravels the entire structure?",
+                "How can you attack the enemy's chain base while reinforcing the head of your own?",
+                "Is your opponent's counter-play targeting the same chain or a different part of the board?",
+            ),
+            conceptualHint = "Pawn chain strategy (Nimzowitsch): attack the BASE, not the head. " +
+                "The base pawn supports the entire chain — if it falls, the chain collapses. " +
+                "The head pawn is the most advanced but is protected by the chain below it.",
+        )
     }
 }
