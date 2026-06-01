@@ -1,6 +1,7 @@
 package com.acepero13.android.gamereviewer.domain
 
 import com.github.bhlangonijr.chesslib.Side
+import com.github.bhlangonijr.chesslib.Square
 
 /**
  * Represents a proactive coaching moment detected in a game position.
@@ -52,6 +53,8 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         val isPlayerSide: Boolean,
         val isLoss: Boolean,
         val pieceCount: Int,
+        val attackerSquares: List<Square> = emptyList(),
+        val targetSquare: Square? = null,
     ) : CoachingTrigger(moveIndex)
 
     /** Multiple non-pawn pieces share overlapping target squares — general piece coordination changed. */
@@ -60,6 +63,8 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         val isPlayerSide: Boolean,
         val isLoss: Boolean,
         val score: Int,
+        val attackerSquares: List<Square> = emptyList(),
+        val targetSquares: List<Square> = emptyList(),
     ) : CoachingTrigger(moveIndex)
 
     // ── Identity ───────────────────────────────────────────────────────────────
@@ -178,6 +183,24 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             else                     ->
                 "Your opponent's piece coordination has broken down. Can you open the position now to exploit the disorganization?"
         }
+    }
+
+    /**
+     * Priority tier for display selection.
+     * When multiple triggers fire at the same position, only the lowest (most critical) tier is shown.
+     *
+     * Tier 1 — Tactical/Safety: backed by a concrete eval loss; the most actionable coaching.
+     * Tier 2 — Significant shift: large eval change or opponent strategic gain worth noting.
+     * Tier 3 — Coordination: requires eval-backed advantage (gated in [CoachingTriggerEvaluator]).
+     * Tier 4 — Positional habits: structural observations, lowest urgency.
+     * Tier 0 — ConversionStrategy: always displayed independently; immune to tier filtering.
+     */
+    fun tier(): Int = when (this) {
+        is Safety, is ForcingMove, is PreMoveChecklist, is ImpulseControl -> 1
+        is CctCheck, is OpponentPlan                                       -> 2
+        is CoordinatedAttack, is PieceHarmony                              -> 3
+        is WorstPiece, is RookActivation, is CandidateMoves, is CandidateSearch -> 4
+        is ConversionStrategy                                              -> 0
     }
 
     // ── Display label used in Reflection Mode selection lists ─────────────────

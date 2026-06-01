@@ -34,6 +34,7 @@ import com.acepero13.chess.core.ui.board.Arrow
 import com.acepero13.chess.core.ui.board.BoardState
 import com.acepero13.chess.core.ui.board.MarkedSquare
 import com.acepero13.chess.core.ui.components.TreeDisplayItem
+import com.acepero13.chess.core.ui.theme.AnalyzeBlue
 import com.acepero13.chess.core.util.ChessUtils
 import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Piece
@@ -61,6 +62,7 @@ private const val TAG = "AnalysisVM"
 
 enum class ReviewMode { NAVIGATE, ANALYSE, MENTOR }
 enum class AnalyseSubMode { VIEW, EDIT, EXPLORE }
+enum class CoordinationQuizPhase { ASKING, REVEALING }
 
 /** Result of the user's attempted move in Mentor move-input mode. */
 enum class MentorMoveResult { CORRECT, CLOSE, INCORRECT }
@@ -274,6 +276,10 @@ data class AnalysisUiState(
     val showProactiveCoaching: Boolean = false,
     /** Move indices where the user tapped the Coach Lamp — used to build reflection items. */
     val triggersEngaged: Set<Int> = emptySet(),
+
+    // ── Coordination visual quiz ──────────────────────────────────────────────
+    /** Phase of the coordination quiz: ASKING (question shown) → REVEALING (arrows on board). */
+    val coordinationQuizPhase: CoordinationQuizPhase = CoordinationQuizPhase.ASKING,
 
     // ── Interactive coach answer mode ─────────────────────────────────────────
     /** True while the user is being prompted to tap a square on the board to answer. */
@@ -671,7 +677,7 @@ class AnalysisViewModel(
             appendLine("FEN: $fenBefore")
             appendLine()
             appendLine("Move played: $san")
-            appendLine("Color to move: $colorLabel")
+            appendLine("Color that played the move: $colorLabel")
             appendLine("Move number: $moveNumber")
             appendLine()
             appendLine("Game phase: $phase")
@@ -930,8 +936,42 @@ class AnalysisViewModel(
             proactiveHangingSquares     = emptyList(),
             proactiveHangingOwnSquares  = emptySet(),
             proactiveFoundSquares       = emptySet(),
+            coordinationQuizPhase       = CoordinationQuizPhase.ASKING,
+            boardState                  = it.boardState.copy(arrows = emptyList()),
         )}
     }
+
+    /** Reveals the coordination arrows on the board for CoordinatedAttack / PieceHarmony triggers. */
+    fun onCoordinationQuizReveal() {
+        val trigger = _uiState.value.activeProactiveTrigger ?: return
+        val arrows = buildCoordinationArrows(trigger)
+        _uiState.update { it.copy(
+            coordinationQuizPhase = CoordinationQuizPhase.REVEALING,
+            boardState = it.boardState.copy(arrows = arrows),
+        )}
+    }
+
+    private fun buildCoordinationArrows(trigger: CoachingTrigger): List<Arrow> = when (trigger) {
+        is CoachingTrigger.CoordinatedAttack -> {
+            val target = trigger.targetSquare ?: return emptyList()
+            trigger.attackerSquares.map { attacker -> Arrow(attacker, target, AnalyzeBlue) }
+        }
+        is CoachingTrigger.PieceHarmony -> {
+            if (trigger.targetSquares.isEmpty() || trigger.attackerSquares.isEmpty()) return emptyList()
+            trigger.attackerSquares.mapNotNull { attacker ->
+                val target = trigger.targetSquares.minByOrNull { t ->
+                    val df = (squareFile(attacker) - squareFile(t)).toLong()
+                    val dr = (squareRank(attacker) - squareRank(t)).toLong()
+                    df * df + dr * dr
+                } ?: return@mapNotNull null
+                Arrow(attacker, target, AnalyzeBlue)
+            }
+        }
+        else -> emptyList()
+    }
+
+    private fun squareFile(sq: Square): Int = BoardAttackHelper.fileOf(sq)
+    private fun squareRank(sq: Square): Int = BoardAttackHelper.rankOf(sq)
 
     /** Marks the current position coach card as dismissed for this session. */
     fun dismissPositionCoach() {
@@ -997,8 +1037,50 @@ class AnalysisViewModel(
                 clone.doMove(move)
                 clone.isKingAttacked
             }.getOrDefault(false)
-            if (isCapture || givesCheck) move.to.name else null
+            when {
+                givesCheck -> move.to.name
+                isCapture && isMateriallyFavorableCapture(board, move, fen, sideToMove) -> move.to.name
+                else -> null
+            }
         }.distinct()
+    }
+
+    /**
+     * Returns true if the opponent's capture is a real threat — i.e., they gain material or at
+     * least break even after any recapture. Filters out losing captures like Qxpawn where the
+     * queen is immediately recaptured.
+     */
+    private fun isMateriallyFavorableCapture(
+        board: Board,
+        move: Move,
+        fen: String,
+        sideToMove: com.github.bhlangonijr.chesslib.Side,
+    ): Boolean {
+        val capturingPiece = board.getPiece(move.from)
+        val capturedPiece  = board.getPiece(move.to)
+        val capturingValue = cctPieceValue(capturingPiece)
+        val capturedValue  = cctPieceValue(capturedPiece)
+        // Always a real threat if the opponent captures a more valuable piece.
+        if (capturedValue >= capturingValue) return true
+        // Captured piece is less valuable — only a real threat if the landing square is
+        // undefended (i.e., the capturing piece cannot be recaptured).
+        val afterCapture = runCatching {
+            val clone = Board().apply { loadFromFen(fen) }
+            clone.doMove(move)
+            clone
+        }.getOrNull() ?: return true
+        val canRecapture = MoveGenerator.generateLegalMoves(afterCapture).any { it.to == move.to }
+        return !canRecapture
+    }
+
+    private fun cctPieceValue(piece: Piece): Int = when (piece.pieceType) {
+        PieceType.PAWN   -> 100
+        PieceType.KNIGHT -> 320
+        PieceType.BISHOP -> 330
+        PieceType.ROOK   -> 500
+        PieceType.QUEEN  -> 900
+        PieceType.KING   -> 20000
+        else             -> 0
     }
 
     /** Validates the square the user tapped against the active trigger's expected answer. */
@@ -2509,7 +2591,7 @@ class AnalysisViewModel(
         val postFen      = postBoard.fen
         val playerWasWhite = postBoard.sideToMove == Side.BLACK  // after White's move it's Black's turn
 
-        // Optimistically show the move
+        // Optimistically show the move; clear stale best-move arrow immediately
         _uiState.update {
             it.copy(
                 boardState = it.boardState.copy(
@@ -2518,6 +2600,7 @@ class AnalysisViewModel(
                     selectedSquare = null,
                     legalMoves     = emptyList(),
                     showingFlash   = false,
+                    arrows         = emptyList(),
                 ),
                 sandboxEngineThinking = true,
                 blunderGuardActive    = false,
@@ -2567,6 +2650,7 @@ class AnalysisViewModel(
                 // Update sandbox baseline eval for next blunder check
                 sandboxEvalCp = postEvalWhite
                 _uiState.update { it.copy(sandboxEngineThinking = false, blunderGuardActive = false) }
+                if (_uiState.value.bestMoveVisible) fetchOnDemandBestMove(postFen)
                 triggerEngineReply(postFen)
             }
         }
@@ -2589,10 +2673,11 @@ class AnalysisViewModel(
                     sandboxEvalCp   = replyResult?.toWhitePerspective(board)
                     _uiState.update {
                         it.copy(
-                            boardState = it.boardState.copy(fen = replyFen, lastMove = move),
+                            boardState = it.boardState.copy(fen = replyFen, lastMove = move, arrows = emptyList()),
                             sandboxEngineThinking = false,
                         )
                     }
+                    if (_uiState.value.bestMoveVisible) fetchOnDemandBestMove(replyFen)
                     return@launch
                 }
             }

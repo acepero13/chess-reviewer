@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
 import com.acepero13.android.gamereviewer.domain.InsightReconciler
+import com.acepero13.android.gamereviewer.ui.screens.CoordinationQuizPhase
+import com.acepero13.chess.core.ui.theme.AnalyzeBlue
 import com.acepero13.chess.core.ui.theme.ChessGold
 
 private val PanelBg     = Color(0xFF1A1A1A)
@@ -77,6 +79,8 @@ fun ProactiveCoachingPanel(
     proactiveAnswerIsCorrect: Boolean? = null,
     proactiveFoundCount:      Int = 0,
     proactiveTotalCount:      Int = 0,
+    coordinationQuizPhase:    CoordinationQuizPhase = CoordinationQuizPhase.ASKING,
+    onCoordinationReveal:     (() -> Unit)? = null,
 ) {
     val insight = InsightReconciler.forTrigger(trigger)
     val hasAnswer = trigger.supportsSquareAnswer()
@@ -290,8 +294,69 @@ fun ProactiveCoachingPanel(
                     fontStyle = FontStyle.Italic,
                 )
 
+                // ── Coordination visual quiz ───────────────────────────────────
+                val isCoordinationTrigger = trigger is CoachingTrigger.CoordinatedAttack ||
+                        trigger is CoachingTrigger.PieceHarmony
+                val hasCoordinationGeometry = when (trigger) {
+                    is CoachingTrigger.CoordinatedAttack -> trigger.attackerSquares.isNotEmpty() && trigger.targetSquare != null
+                    is CoachingTrigger.PieceHarmony      -> trigger.attackerSquares.isNotEmpty() && trigger.targetSquares.isNotEmpty()
+                    else                                 -> false
+                }
+                if (isCoordinationTrigger && hasCoordinationGeometry && onCoordinationReveal != null) {
+                    HorizontalDivider(color = PanelBorder.copy(alpha = 0.25f))
+                    when (coordinationQuizPhase) {
+                        CoordinationQuizPhase.ASKING -> {
+                            Text(
+                                text  = "Can you spot how these pieces are working together? Try to identify the square they're all targeting before I show you.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = PanelText.copy(alpha = 0.85f),
+                                fontStyle = FontStyle.Italic,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick  = onCoordinationReveal,
+                                    modifier = Modifier.weight(1f),
+                                    shape    = RoundedCornerShape(8.dp),
+                                    border   = BorderStroke(1.dp, AnalyzeBlue.copy(alpha = 0.7f)),
+                                ) {
+                                    Text(
+                                        text  = "I see it",
+                                        color = AnalyzeBlue,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick  = onCoordinationReveal,
+                                    modifier = Modifier.weight(1f),
+                                    shape    = RoundedCornerShape(8.dp),
+                                    border   = BorderStroke(1.dp, PanelBorder.copy(alpha = 0.7f)),
+                                ) {
+                                    Text(
+                                        text  = "Show me",
+                                        color = PanelText.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                        CoordinationQuizPhase.REVEALING -> {
+                            Text(
+                                text  = "↑ Arrows show the coordination on the board.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AnalyzeBlue.copy(alpha = 0.85f),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
+
                 // ── Free-text reflection (Socratic-only triggers) ──────────────
-                if (!hasAnswer) {
+                if (!hasAnswer && !isCoordinationTrigger) {
                     HorizontalDivider(color = PanelBorder.copy(alpha = 0.25f))
 
                     if (savedReflection.isNotEmpty()) {

@@ -32,13 +32,13 @@ object CoachingTriggerEvaluator {
     private const val WORST_PIECE_STREAK_NEEDED      = 3   // consecutive positions with same restricted piece
     private const val MIDDLEGAME_START               = 10  // half-move index
     private const val MIDDLEGAME_END                 = 50  // half-move index
-    private const val OPPONENT_PLAN_MIN_CP           = 30  // minimum gain to note opponent's plan
+    private const val OPPONENT_PLAN_MIN_CP           = 50  // minimum gain to note opponent's plan
     private const val OPPONENT_PLAN_MAX_CP           = 120 // above this it's a user blunder (already flagged)
     private const val KING_MIN_ADJACENT_DEFENDERS    = 1   // fewer than this = Safety candidate
     // Safety only fires when there is a genuine tactical reason, not merely structural exposure.
     // If the evaluation drop is below this and no opponent piece directly attacks a king-adjacent
     // square, the position is treated as structural — promote CandidateSearch instead.
-    private const val SAFETY_MIN_CP_DROP             = 50
+    private const val SAFETY_MIN_CP_DROP             = 100
     // In the opening phase, only fire PreMoveChecklist / ForcingMove when the
     // mover dropped ≥ this many centipawns — suppress intentional tension / gambits.
     private const val OPENING_TRIGGER_THRESHOLD_CP   = -75
@@ -56,7 +56,7 @@ object CoachingTriggerEvaluator {
     // Suppress when the played move itself was good (e.g., the user captured the hanging piece).
     private const val FORCING_MOVE_MIN_CP_LOSS       = 100
     // PreMoveChecklist is a habit trigger — suppress it when the move played was not actually bad.
-    private const val PRE_MOVE_CHECKLIST_MIN_CP_LOSS = 50
+    private const val PRE_MOVE_CHECKLIST_MIN_CP_LOSS = 100
     // When the player holds a significant advantage, suppress Development/Positional triggers and
     // promote conversion coaching instead. Configurable — 500 cp = 5.0 pawns.
     private const val CONVERSION_ADVANTAGE_THRESHOLD_CP = 500
@@ -70,6 +70,12 @@ object CoachingTriggerEvaluator {
     private const val HARMONY_FIRE_THRESHOLD      = 6
     private const val HARMONY_LOSS_THRESHOLD      = 3
     private const val HARMONY_MIN_DELTA           = 2
+    // Coordination triggers (PieceHarmony, CoordinatedAttack) must be backed by a real eval edge.
+    // If the position is near-equal, a geometry transition is noise, not a coaching signal.
+    // Also suppressed when the mover just blundered — opponent coordination gain is a consequence,
+    // not an independent pattern worth coaching.
+    private const val COORDINATION_EVAL_MIN_ADVANTAGE_CP = 50
+    private const val COORDINATION_BLUNDER_SUPPRESS_CP   = 150
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -99,9 +105,10 @@ object CoachingTriggerEvaluator {
         var prevOpponentHarmony    = 0
 
         sorted.forEachIndexed { i, eval ->
-            val triggers  = mutableListOf<CoachingTrigger>()
-            val prevEval  = if (i > 0) sorted[i - 1] else null
-            val isWhite   = eval.moveIndex % 2 == 1
+            val triggers   = mutableListOf<CoachingTrigger>()
+            val prevEval   = if (i > 0) sorted[i - 1] else null
+            val isWhite    = eval.moveIndex % 2 == 1
+            val moverLoss  = if (isWhite) -eval.evalDelta else eval.evalDelta
 
             // Only load the board once and reuse for multiple triggers
             val board: Board? = runCatching {
@@ -125,7 +132,7 @@ object CoachingTriggerEvaluator {
 
             // ── 3. Worst Piece ────────────────────────────────────────────────
             if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
-                detectWorstPiece(board, eval.moveIndex, isWhite, worstPieceStreak)
+                detectWorstPiece(board, eval.moveIndex, playerIsWhite, worstPieceStreak)
                     ?.let { triggers.add(it) }
             } else if (eval.moveIndex !in MIDDLEGAME_START..MIDDLEGAME_END) {
                 worstPieceStreak.clear()
@@ -133,8 +140,8 @@ object CoachingTriggerEvaluator {
 
             // ── 4. Forcing Move ───────────────────────────────────────────────
             // Suppress in the opening unless the mover actually blundered (≥75 cp drop).
-            detectForcingMove(eval)
-                ?.takeIf { eval.moveIndex >= MIDDLEGAME_START || eval.evalDelta <= OPENING_TRIGGER_THRESHOLD_CP }
+            detectForcingMove(eval, isWhite, playerIsWhite, moverLoss)
+                ?.takeIf { eval.moveIndex >= MIDDLEGAME_START || moverLoss >= -OPENING_TRIGGER_THRESHOLD_CP }
                 ?.let { triggers.add(it) }
 
             // ── 5. Opponent's Plan ────────────────────────────────────────────
@@ -146,8 +153,8 @@ object CoachingTriggerEvaluator {
             // Suppress in the opening unless there is a genuine mistake — tension
             // (gambits, accepted pawns) is intentional and should not be flagged.
             if (board != null) {
-                detectPreMoveChecklist(board, eval)
-                    ?.takeIf { eval.moveIndex >= MIDDLEGAME_START || eval.evalDelta <= OPENING_TRIGGER_THRESHOLD_CP }
+                detectPreMoveChecklist(board, eval, moverLoss)
+                    ?.takeIf { eval.moveIndex >= MIDDLEGAME_START || moverLoss >= -OPENING_TRIGGER_THRESHOLD_CP }
                     ?.let { triggers.add(it) }
             }
 
@@ -175,6 +182,11 @@ object CoachingTriggerEvaluator {
             // ── 11. Coordination Triggers ─────────────────────────────────────────
             // Fire only on state transitions (gained / lost) to avoid repeating on
             // consecutive moves where coordination barely changes.
+            //
+            // Opponent-GAINING triggers (isLoss = false) are eval-gated: the opponent must
+            // hold a genuine evaluation advantage AND the mover must not have just blundered.
+            // This prevents geometry transitions caused by a tactical mistake from being
+            // mislabelled as a coordination coaching moment.
             if (board != null && eval.moveIndex >= MIDDLEGAME_START) {
                 val playerSide   = if (playerIsWhite) Side.WHITE else Side.BLACK
                 val opponentSide = if (playerIsWhite) Side.BLACK else Side.WHITE
@@ -184,40 +196,76 @@ object CoachingTriggerEvaluator {
                 val newPlayerHarmony      = CoordinationAnalyzer.generalCoordinationScore(board, playerSide)
                 val newOpponentHarmony    = CoordinationAnalyzer.generalCoordinationScore(board, opponentSide)
 
-                // Player king attack
+                // Eval gate: coordination GAINING triggers require (a) the gaining side holds a
+                // real eval edge, (b) the mover did not just blunder, (c) no piece is genuinely
+                // hanging, and (d) there is no forcing tactical motif.
+                // Conditions (c) and (d) prevent Ne5-style blunders from triggering coordination
+                // coaching: a piece placed on a strong central square can temporarily boost the
+                // harmony score even though it is about to be captured for free.
+                val opponentEvalAdvantage  = if (playerIsWhite) -eval.evalCp else eval.evalCp
+                val playerEvalAdvantage    = if (playerIsWhite) eval.evalCp  else -eval.evalCp
+                val moverJustBlundered     = moverLoss >= COORDINATION_BLUNDER_SUPPRESS_CP
+                val hasHangingPiece        = BoardAttackHelper.allPieces(board)
+                    .filter { (_, piece) -> piece.pieceType != PieceType.KING }
+                    .any    { (sq, piece) -> isGenuinelyHanging(board, sq, piece) }
+                val isTacticallyClean      = !hasHangingPiece && eval.motif == "mixed"
+                val opponentGainIsEvalBacked =
+                    opponentEvalAdvantage >= COORDINATION_EVAL_MIN_ADVANTAGE_CP &&
+                    !moverJustBlundered && isTacticallyClean
+                val playerGainIsEvalBacked  =
+                    playerEvalAdvantage   >= COORDINATION_EVAL_MIN_ADVANTAGE_CP &&
+                    !moverJustBlundered && isTacticallyClean
+
+                // Player king attack — gaining requires eval backing; loss always fires
                 when {
-                    newPlayerKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevPlayerKingAttack < KING_ATTACK_FIRE_THRESHOLD ->
-                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = true, isLoss = false, pieceCount = newPlayerKingAttack))
+                    newPlayerKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevPlayerKingAttack < KING_ATTACK_FIRE_THRESHOLD -> {
+                        if (playerGainIsEvalBacked) {
+                            val detail = CoordinationAnalyzer.kingAttackDetail(board, playerSide)
+                            triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = true, isLoss = false, pieceCount = newPlayerKingAttack, attackerSquares = detail.attackerSquares, targetSquare = detail.targetSquares.firstOrNull()))
+                        }
+                    }
                     newPlayerKingAttack <= KING_ATTACK_LOSS_THRESHOLD && prevPlayerKingAttack >= KING_ATTACK_FIRE_THRESHOLD ->
                         triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = true, isLoss = true, pieceCount = prevPlayerKingAttack))
                 }
-                // Opponent king attack
+                // Opponent king attack — gaining requires eval backing; loss always fires
                 when {
-                    newOpponentKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevOpponentKingAttack < KING_ATTACK_FIRE_THRESHOLD ->
-                        triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = false, isLoss = false, pieceCount = newOpponentKingAttack))
+                    newOpponentKingAttack >= KING_ATTACK_FIRE_THRESHOLD && prevOpponentKingAttack < KING_ATTACK_FIRE_THRESHOLD -> {
+                        if (opponentGainIsEvalBacked) {
+                            val detail = CoordinationAnalyzer.kingAttackDetail(board, opponentSide)
+                            triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = false, isLoss = false, pieceCount = newOpponentKingAttack, attackerSquares = detail.attackerSquares, targetSquare = detail.targetSquares.firstOrNull()))
+                        }
+                    }
                     newOpponentKingAttack <= KING_ATTACK_LOSS_THRESHOLD && prevOpponentKingAttack >= KING_ATTACK_FIRE_THRESHOLD ->
                         triggers.add(CoachingTrigger.CoordinatedAttack(eval.moveIndex, isPlayerSide = false, isLoss = true, pieceCount = prevOpponentKingAttack))
                 }
 
-                // Player piece harmony (only when no CoordinatedAttack fired for the player this move)
+                // Player piece harmony — gaining requires eval backing; loss always fires
                 val playerAttackFired = triggers.any { it is CoachingTrigger.CoordinatedAttack && it.isPlayerSide }
                 if (!playerAttackFired) {
                     val delta = newPlayerHarmony - prevPlayerHarmony
                     when {
-                        newPlayerHarmony >= HARMONY_FIRE_THRESHOLD && prevPlayerHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA ->
-                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = true, isLoss = false, score = newPlayerHarmony))
+                        newPlayerHarmony >= HARMONY_FIRE_THRESHOLD && prevPlayerHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA -> {
+                            if (playerGainIsEvalBacked) {
+                                val detail = CoordinationAnalyzer.harmonyDetail(board, playerSide)
+                                triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = true, isLoss = false, score = newPlayerHarmony, attackerSquares = detail.attackerSquares, targetSquares = detail.targetSquares))
+                            }
+                        }
                         newPlayerHarmony <= HARMONY_LOSS_THRESHOLD && prevPlayerHarmony >= HARMONY_FIRE_THRESHOLD && kotlin.math.abs(delta) >= HARMONY_MIN_DELTA ->
                             triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = true, isLoss = true, score = prevPlayerHarmony))
                     }
                 }
 
-                // Opponent piece harmony (only when no CoordinatedAttack fired for the opponent this move)
+                // Opponent piece harmony — gaining requires eval backing; loss always fires
                 val opponentAttackFired = triggers.any { it is CoachingTrigger.CoordinatedAttack && !it.isPlayerSide }
                 if (!opponentAttackFired) {
                     val delta = newOpponentHarmony - prevOpponentHarmony
                     when {
-                        newOpponentHarmony >= HARMONY_FIRE_THRESHOLD && prevOpponentHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA ->
-                            triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = false, isLoss = false, score = newOpponentHarmony))
+                        newOpponentHarmony >= HARMONY_FIRE_THRESHOLD && prevOpponentHarmony < HARMONY_FIRE_THRESHOLD && delta >= HARMONY_MIN_DELTA -> {
+                            if (opponentGainIsEvalBacked) {
+                                val detail = CoordinationAnalyzer.harmonyDetail(board, opponentSide)
+                                triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = false, isLoss = false, score = newOpponentHarmony, attackerSquares = detail.attackerSquares, targetSquares = detail.targetSquares))
+                            }
+                        }
                         newOpponentHarmony <= HARMONY_LOSS_THRESHOLD && prevOpponentHarmony >= HARMONY_FIRE_THRESHOLD && kotlin.math.abs(delta) >= HARMONY_MIN_DELTA ->
                             triggers.add(CoachingTrigger.PieceHarmony(eval.moveIndex, isPlayerSide = false, isLoss = true, score = prevOpponentHarmony))
                     }
@@ -227,6 +275,23 @@ object CoachingTriggerEvaluator {
                 prevOpponentKingAttack = newOpponentKingAttack
                 prevPlayerHarmony      = newPlayerHarmony
                 prevOpponentHarmony    = newOpponentHarmony
+            }
+
+            // ── Post-processing: tactical blunder suppression ─────────────────────
+            // When the mover just blundered (≥ COORDINATION_BLUNDER_SUPPRESS_CP), all
+            // tier-3/4 positional triggers are noise. Tier-1 tactical triggers
+            // (ForcingMove, PreMoveChecklist, Safety, ImpulseControl) and tier-2
+            // (CctCheck) are the appropriate coaching voice at such positions.
+            if (moverLoss >= COORDINATION_BLUNDER_SUPPRESS_CP) {
+                triggers.removeAll {
+                    it is CoachingTrigger.PieceHarmony       ||
+                    it is CoachingTrigger.CoordinatedAttack  ||
+                    it is CoachingTrigger.WorstPiece         ||
+                    it is CoachingTrigger.CandidateMoves     ||
+                    it is CoachingTrigger.CandidateSearch    ||
+                    it is CoachingTrigger.RookActivation     ||
+                    it is CoachingTrigger.OpponentPlan
+                }
             }
 
             // ── 12. Conversion Strategy / Advantage Handler ───────────────────────
@@ -251,11 +316,14 @@ object CoachingTriggerEvaluator {
             }
 
             if (triggers.isNotEmpty()) {
-                // Prioritize high-severity triggers: if Safety fires at this position,
-                // remove generic pedagogical prompts to avoid noise.
-                val hasSafety = triggers.any { it is CoachingTrigger.Safety }
-                if (hasSafety) {
-                    triggers.removeAll { it is CoachingTrigger.ForcingMove || it is CoachingTrigger.PreMoveChecklist }
+                // Tier-based prioritization: keep only the highest-priority tier that fired.
+                // ConversionStrategy (tier 0) is immune — already injected above after clearing
+                // lower-priority triggers, so it is never filtered here.
+                // Within a tier, all triggers are kept (e.g., Safety + ForcingMove can co-exist).
+                val nonConversion = triggers.filter { it !is CoachingTrigger.ConversionStrategy }
+                if (nonConversion.isNotEmpty()) {
+                    val highestTier: Int = nonConversion.minOf { it.tier() }
+                    triggers.removeAll { it !is CoachingTrigger.ConversionStrategy && it.tier() != highestTier }
                 }
                 if (triggers.isNotEmpty()) {
                     result[eval.moveIndex] = triggers
@@ -384,12 +452,22 @@ object CoachingTriggerEvaluator {
         } else null
     }
 
-    private fun detectForcingMove(eval: GameEvaluation): CoachingTrigger.ForcingMove? {
+    private fun detectForcingMove(
+        eval: GameEvaluation,
+        isWhite: Boolean,
+        playerIsWhite: Boolean,
+        moverLoss: Int,
+    ): CoachingTrigger.ForcingMove? {
         if (eval.motif !in listOf("fork", "hanging", "checkmate")) return null
-        // Only fire when the mover actually missed the forcing sequence.
-        // If evalDelta is near zero or positive, the player either played the tactic or
-        // was unaffected — no coaching noise needed.
-        if (eval.evalDelta > -FORCING_MOVE_MIN_CP_LOSS) return null
+        // ForcingMove coaches the player who is ABOUT TO MOVE after the opponent blundered.
+        // The player is to move only at positions created by the opponent's last move:
+        //   Black player → fires after White's moves (isWhite=true, playerIsWhite=false)
+        //   White player → fires after Black's moves (isWhite=false, playerIsWhite=true)
+        val isPlayerToMove = isWhite != playerIsWhite
+        if (!isPlayerToMove) return null
+        // Only fire when the mover (opponent) actually dropped significant material.
+        // moverLoss is perspective-correct: positive = mover lost centipawns.
+        if (moverLoss < FORCING_MOVE_MIN_CP_LOSS) return null
         return CoachingTrigger.ForcingMove(eval.moveIndex, eval.motif)
     }
 
@@ -406,10 +484,15 @@ object CoachingTriggerEvaluator {
         } else null
     }
 
-    private fun detectPreMoveChecklist(board: Board, eval: GameEvaluation): CoachingTrigger.PreMoveChecklist? {
+    private fun detectPreMoveChecklist(
+        board: Board,
+        eval: GameEvaluation,
+        moverLoss: Int,
+    ): CoachingTrigger.PreMoveChecklist? {
         // Suppress on neutral or strong moves — the habit prompt only makes sense when
-        // the player actually missed a hanging piece, not when they took it.
-        if (eval.evalDelta > -PRE_MOVE_CHECKLIST_MIN_CP_LOSS) return null
+        // the mover actually dropped significant material, leaving a piece hanging.
+        // moverLoss is perspective-correct: positive = mover lost centipawns.
+        if (moverLoss < PRE_MOVE_CHECKLIST_MIN_CP_LOSS) return null
 
         val hangingSquare = BoardAttackHelper.allPieces(board)
             .filter { (_, piece) -> piece.pieceType != PieceType.KING }

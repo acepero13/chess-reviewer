@@ -492,6 +492,8 @@ fun AnalysisScreen(
                                     proactiveAnswerIsCorrect = state.proactiveAnswerIsCorrect,
                                     proactiveFoundCount      = state.proactiveFoundSquares.size,
                                     proactiveTotalCount      = state.proactiveHangingSquares.size,
+                                    coordinationQuizPhase    = state.coordinationQuizPhase,
+                                    onCoordinationReveal     = vm::onCoordinationQuizReveal,
                                     modifier                 = Modifier.fillMaxWidth(),
                                 )
                             }

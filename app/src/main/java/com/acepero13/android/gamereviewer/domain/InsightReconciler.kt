@@ -422,17 +422,17 @@ object InsightReconciler {
             )
             !trigger.isPlayerSide && !trigger.isLoss -> Insight(
                 emoji       = "👁️",
-                title       = "Opponent's Pieces Are Well Coordinated",
-                description = "Your opponent's pieces are sharing targets and supporting each other. " +
-                    "Coordinated pieces are difficult to fight piecemeal — you must address the whole system.",
+                title       = "Opponent's Pieces Are Coordinating",
+                description = "Your opponent's pieces are converging on shared targets and reinforcing each other. " +
+                    "This is a real strategic advantage — ask what concrete plan they support.",
                 questions   = listOf(
-                    "What plan do all of your opponent's coordinated pieces support together?",
-                    "Which piece is the key to their coordination — the 'conductor' of the plan?",
-                    "Can you disrupt the coordination with a pawn break, an exchange sacrifice, or a counter-threat?",
+                    "Which squares or pieces are all of your opponent's active pieces pointing at right now?",
+                    "Does your opponent have an immediate forcing threat — a capture, a check, or a fork — you need to stop first?",
+                    "Can you create a counter-threat that forces your opponent to react before the coordination becomes decisive?",
                 ),
-                conceptualHint = "Coordinated pieces are stronger than the sum of their parts. " +
-                    "To fight coordination, disrupt it: force your opponent to react to your threats " +
-                    "rather than pursuing their plan. A well-timed pawn break or sacrifice can shatter coordination instantly.",
+                conceptualHint = "Coordinated pieces are more dangerous than their individual values suggest. " +
+                    "Identify the key piece holding the coordination together — challenging or removing it " +
+                    "disrupts the entire plan. A timely counter-threat is often stronger than passive defence.",
             )
             else -> Insight(
                 emoji       = "🔓",
