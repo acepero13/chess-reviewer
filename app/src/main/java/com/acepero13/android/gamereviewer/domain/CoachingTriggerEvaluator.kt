@@ -145,7 +145,7 @@ object CoachingTriggerEvaluator {
                 ?.let { triggers.add(it) }
 
             // ── 5. Opponent's Plan ────────────────────────────────────────────
-            if (prevEval != null) {
+            if (prevEval != null && isWhite != playerIsWhite) {
                 detectOpponentPlan(eval, prevEval, isWhite)?.let { triggers.add(it) }
             }
 
@@ -160,12 +160,15 @@ object CoachingTriggerEvaluator {
 
             // ── 7. Rook Activation ────────────────────────────────────────────
             if (board != null && eval.moveIndex in ROOK_ACTIVATION_MIN_HALF_MOVE..MIDDLEGAME_END) {
-                detectRookActivation(board, eval.moveIndex, isWhite)?.let { triggers.add(it) }
+                detectRookActivation(board, eval.moveIndex, playerIsWhite)?.let { triggers.add(it) }
             }
 
             // ── 8. Impulse Control ────────────────────────────────────────────
             // Fast move (< 5 s) that caused a significant evaluation drop.
-            detectImpulseControl(eval, isWhite, timeByMoveIndex)?.let { triggers.add(it) }
+            // Only coach the player's own impulsive moves, not the opponent's.
+            if (isWhite == playerIsWhite) {
+                detectImpulseControl(eval, isWhite, timeByMoveIndex)?.let { triggers.add(it) }
+            }
 
             // ── 9. Candidate Search ───────────────────────────────────────────
             // Moderately complex position with no forcing sequence — multiple plans exist.
