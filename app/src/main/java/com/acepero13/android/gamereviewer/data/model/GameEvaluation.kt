@@ -29,4 +29,7 @@ data class GameEvaluation(
     /** Comma-separated [CoachingTrigger] type names detected at this position, e.g. "SAFETY,WORST_PIECE".
      *  Empty string when no triggers fire or when the game predates trigger detection (DB v4+). */
     val coachingTriggers: String = "",
+    /** Comma-separated UCI moves from the engine's principal variation (up to 6 half-moves).
+     *  Empty when no PV was captured or for games analyzed before DB v6. */
+    val pvLine: String = "",
 )

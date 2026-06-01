@@ -56,6 +56,10 @@ class TruthMapBuilder(private val engine: StockfishEngine) {
             val evalCp = result?.toWhitePerspective(board) ?: prevEvalCp
             val evalDelta = evalCp - prevEvalCp
             val motif = result?.let { MotifClassifier.classify(it, board.fen) } ?: "mixed"
+            val pvLine = result?.pv
+                ?.take(ChessConstants.MAX_FORCING_SEQUENCE_DEPTH)
+                ?.joinToString(",")
+                ?: ""
 
             entries.add(
                 TruthMapEntry(
@@ -64,6 +68,7 @@ class TruthMapBuilder(private val engine: StockfishEngine) {
                     evalCp    = evalCp,
                     evalDelta = evalDelta,
                     motif     = motif,
+                    pvLine    = pvLine,
                 )
             )
             prevEvalCp = evalCp

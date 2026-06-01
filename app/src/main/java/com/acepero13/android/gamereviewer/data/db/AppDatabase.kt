@@ -28,6 +28,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   3 → added game_evaluations, move_times
  *   4 → added coachingTriggers column to game_evaluations (Board Scan triggers)
  *   5 → added endgame_encounters table (endgame chapter recognition)
+ *   6 → added pvLine column to game_evaluations (forcing sequence PV storage)
  */
 @Database(
     entities    = [
@@ -38,7 +39,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         MoveTimeData::class,
         EndgameEncounter::class,
     ],
-    version     = 5,
+    version     = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -73,6 +74,14 @@ abstract class AppDatabase : RoomDatabase() {
                         hadMistake INTEGER NOT NULL DEFAULT 0
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE game_evaluations ADD COLUMN pvLine TEXT NOT NULL DEFAULT ''"
                 )
             }
         }

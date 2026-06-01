@@ -59,6 +59,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -401,6 +402,49 @@ fun AnalysisScreen(
             // ── Navigation controls (always visible, disabled in MENTOR) ───────
             NavigationControls(state = state, vm = vm, snackbar = snackbar, scope = scope)
 
+            // Proactive coaching panel — outside AnimatedContent so it survives mode transitions
+            // (e.g. forcing-sequence animation enters sandbox/ANALYSE mode while panel stays visible)
+            if (!state.showOpeningDeviationPanel && !state.showEndgameRecognitionPanel && !state.showMiddlegamePlanPanel) {
+                state.activeProactiveTrigger?.let { trigger ->
+                    ProactiveCoachingPanel(
+                        trigger                   = trigger,
+                        visible                   = state.showProactiveCoaching,
+                        onDismiss                 = vm::dismissProactiveCoaching,
+                        onStartInteraction        = vm::startProactiveInteraction,
+                        proactiveInteractiveMode  = state.proactiveInteractiveMode,
+                        proactiveAnswerFeedback   = state.proactiveAnswerFeedback,
+                        proactiveAnswerIsCorrect  = state.proactiveAnswerIsCorrect,
+                        proactiveFoundCount       = state.proactiveFoundSquares.size,
+                        proactiveTotalCount       = state.proactiveHangingSquares.size,
+                        coordinationQuizPhase     = state.coordinationQuizPhase,
+                        onCoordinationReveal      = vm::onCoordinationQuizReveal,
+                        onTryForcingSequence      = vm::enterForcingSequenceMode,
+                        onShowForcingSequence     = vm::showForcingSequence,
+                        onReplayForcingSequence   = vm::replayForcingSequence,
+                        forcingSequenceMode       = state.forcingSequenceMode,
+                        forcingSequenceAnimating  = state.forcingSequenceAnimating,
+                        forcingSequenceComplete   = state.forcingSequenceComplete,
+                        forcingSequenceCurrentStep = state.forcingSequenceCurrentStep,
+                        forcingSequenceTotalSteps  = state.forcingSequencePvMoves.size,
+                        modifier                  = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // Forcing sequence banner — shown in sandbox explore mode (try / animating / complete)
+            if (state.forcingSequenceMode && state.analyseSubMode == AnalyseSubMode.EXPLORE) {
+                ForcingSequenceBanner(
+                    animating  = state.forcingSequenceAnimating,
+                    complete   = state.forcingSequenceComplete,
+                    currentStep = state.forcingSequenceCurrentStep,
+                    totalSteps  = state.forcingSequencePvMoves.size,
+                    onGiveUp    = vm::showForcingSequence,
+                    onReplay    = vm::replayForcingSequence,
+                    onDone      = vm::exitForcingSequenceMode,
+                    modifier    = Modifier.fillMaxWidth(),
+                )
+            }
+
             // ── Mode-specific content panel ────────────────────────────────────
             AnimatedContent(
                 targetState    = state.reviewMode,
@@ -479,42 +523,23 @@ fun AnalysisScreen(
                             }
                         }
 
-                        // Proactive coaching panel (Board Scan triggers)
-                        if (!state.showOpeningDeviationPanel && !state.showEndgameRecognitionPanel && !state.showMiddlegamePlanPanel) {
-                            state.activeProactiveTrigger?.let { trigger ->
-                                ProactiveCoachingPanel(
-                                    trigger                  = trigger,
-                                    visible                  = state.showProactiveCoaching,
-                                    onDismiss                = vm::dismissProactiveCoaching,
-                                    onStartInteraction       = vm::startProactiveInteraction,
-                                    proactiveInteractiveMode = state.proactiveInteractiveMode,
-                                    proactiveAnswerFeedback  = state.proactiveAnswerFeedback,
-                                    proactiveAnswerIsCorrect = state.proactiveAnswerIsCorrect,
-                                    proactiveFoundCount      = state.proactiveFoundSquares.size,
-                                    proactiveTotalCount      = state.proactiveHangingSquares.size,
-                                    coordinationQuizPhase    = state.coordinationQuizPhase,
-                                    onCoordinationReveal     = vm::onCoordinationQuizReveal,
-                                    modifier                 = Modifier.fillMaxWidth(),
-                                )
+                        // Structured analysis prompt (position coach) — only when:
+                        //   • setting is enabled
+                        //   • a highlight exists at this move
+                        //   • proactive coaching panel is not already open
+                        //   • user hasn't dismissed it for this position this session
+                        if (state.positionCoachEnabled && !state.showProactiveCoaching &&
+                            !state.showOpeningDeviationPanel && !state.showEndgameRecognitionPanel && !state.showMiddlegamePlanPanel) {
+                            val highlight = remember(state.moveIndex, state.gameHighlights) {
+                                state.gameHighlights.firstOrNull { it.moveIndex == state.moveIndex }
                             }
-
-                            // Structured analysis prompt (position coach) — only when:
-                            //   • setting is enabled
-                            //   • a highlight exists at this move
-                            //   • proactive coaching panel is not already open
-                            //   • user hasn't dismissed it for this position this session
-                            if (state.positionCoachEnabled && !state.showProactiveCoaching) {
-                                val highlight = remember(state.moveIndex, state.gameHighlights) {
-                                    state.gameHighlights.firstOrNull { it.moveIndex == state.moveIndex }
-                                }
-                                if (highlight != null && state.moveIndex !in state.positionCoachDismissedMoves) {
-                                    PositionCoachCard(
-                                        moveIndex = state.moveIndex,
-                                        highlight = highlight,
-                                        onDismiss = vm::dismissPositionCoach,
-                                        modifier  = Modifier.fillMaxWidth(),
-                                    )
-                                }
+                            if (highlight != null && state.moveIndex !in state.positionCoachDismissedMoves) {
+                                PositionCoachCard(
+                                    moveIndex = state.moveIndex,
+                                    highlight = highlight,
+                                    onDismiss = vm::dismissPositionCoach,
+                                    modifier  = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
 
@@ -825,14 +850,20 @@ private fun AnalysisBottomBar(
                             enabled         = analysisReady,
                             onDisabledClick = if (!analysisReady) onNotReady else null,
                         )
-                        // ── Coach Lamp — only lights when the trigger TYPE hasn't appeared
-                        // in the last 3 moves, suppressing repetitive alerts for the same
-                        // structural weakness that persists across consecutive positions.
-                        val currentTriggerType = state.triggersByMove[state.moveIndex]?.firstOrNull()?.typeName()
-                        val recentTriggerTypes = (1..3).mapNotNull {
-                            state.triggersByMove[state.moveIndex - it]?.firstOrNull()?.typeName()
+                        // ── Coach Lamp ────────────────────────────────────────────
+                        // Tier-1 triggers (Safety, ForcingMove, PreMoveChecklist,
+                        // ImpulseControl) are backed by a concrete eval loss and always
+                        // light the lamp — no recency suppression.
+                        // Lower-tier positional/structural habits (WorstPiece, Rook,
+                        // CandidateMoves …) use a same-side recency window (step by 2
+                        // to skip opponent moves) to avoid repetitive alerts.
+                        val currentTrigger     = state.triggersByMove[state.moveIndex]?.firstOrNull()
+                        val currentTriggerType = currentTrigger?.typeName()
+                        val recentTriggerTypes = (1..3).mapNotNull { step ->
+                            state.triggersByMove[state.moveIndex - step * 2]?.firstOrNull()?.typeName()
                         }.toSet()
-                        val hasActiveTrigger   = currentTriggerType != null && currentTriggerType !in recentTriggerTypes
+                        val hasActiveTrigger   = currentTrigger != null &&
+                            (currentTrigger.tier() == 1 || currentTriggerType !in recentTriggerTypes)
                         BottomBarButton(
                             icon            = Icons.Outlined.Lightbulb,
                             label           = "Coach",
@@ -1350,6 +1381,114 @@ private fun CoachsBriefingCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFFF8F00),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForcingSequenceBanner(
+    animating:   Boolean,
+    complete:    Boolean,
+    currentStep: Int,
+    totalSteps:  Int,
+    onGiveUp:    () -> Unit,
+    onReplay:    () -> Unit,
+    onDone:      () -> Unit,
+    modifier:    Modifier = Modifier,
+) {
+    val panelBg     = Color(0xFF1A2E1A)
+    val panelBorder = Color(0xFF2D6A4F)
+    val panelText   = Color(0xFFCCE8D9)
+
+    Card(
+        shape  = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = panelBg),
+        border = BorderStroke(1.dp, panelBorder.copy(alpha = 0.7f)),
+        modifier = modifier,
+    ) {
+        when {
+            animating -> {
+                val progress = if (totalSteps > 0) currentStep.toFloat() / totalSteps else 0f
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text  = "Watching the forcing sequence… ($currentStep/$totalSteps)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = panelText.copy(alpha = 0.9f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    LinearProgressIndicator(
+                        progress  = { progress },
+                        modifier  = Modifier.fillMaxWidth(),
+                        color     = com.acepero13.chess.core.ui.theme.AnalyzeBlue,
+                        trackColor = panelBorder.copy(alpha = 0.3f),
+                    )
+                }
+            }
+            complete -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text       = "Explore variations freely",
+                        style      = MaterialTheme.typography.bodySmall,
+                        color      = panelText.copy(alpha = 0.8f),
+                        modifier   = Modifier.weight(1f),
+                    )
+                    OutlinedButton(
+                        onClick = onReplay,
+                        shape   = RoundedCornerShape(6.dp),
+                        border  = BorderStroke(1.dp, com.acepero13.chess.core.ui.theme.AnalyzeBlue.copy(alpha = 0.7f)),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text("Replay", style = MaterialTheme.typography.labelSmall, color = com.acepero13.chess.core.ui.theme.AnalyzeBlue)
+                    }
+                    OutlinedButton(
+                        onClick = onDone,
+                        shape   = RoundedCornerShape(6.dp),
+                        border  = BorderStroke(1.dp, panelBorder.copy(alpha = 0.6f)),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text("Done", style = MaterialTheme.typography.labelSmall, color = panelText.copy(alpha = 0.7f))
+                    }
+                }
+            }
+            else -> {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text       = "Find the forcing sequence!",
+                        style      = MaterialTheme.typography.bodySmall,
+                        color      = ChessGold.copy(alpha = 0.9f),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedButton(
+                        onClick = onGiveUp,
+                        shape   = RoundedCornerShape(6.dp),
+                        border  = BorderStroke(1.dp, panelBorder.copy(alpha = 0.6f)),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text  = "Give up",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = panelText.copy(alpha = 0.7f),
+                        )
+                    }
+                }
             }
         }
     }

@@ -18,6 +18,8 @@ data class TruthMapEntry(
     val evalCp: Int,
     val evalDelta: Int,
     val motif: String,
+    /** Comma-separated UCI moves from the engine's PV, up to [ChessConstants.MAX_FORCING_SEQUENCE_DEPTH] half-moves. */
+    val pvLine: String = "",
 ) {
     /**
      * The side that just played this move (0 = White on moves 1,3,5…; 1 = Black on 2,4,6…).

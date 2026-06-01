@@ -280,21 +280,30 @@ object InsightReconciler {
                 "Ask yourself: 'Am I playing the first move I saw, or the best move I found?'",
         )
 
-        is CoachingTrigger.CandidateSearch -> Insight(
-            emoji       = "🔍",
-            title       = "Candidate Search",
-            description = "This position is rich with possibilities — multiple plans exist with " +
-                "very different tactical and strategic consequences.",
-            questions   = listOf(
-                "Can you find two different plans — one more aggressive, one more solid — and name them?",
-                "Why is Plan A better than Plan B in this specific pawn structure and piece placement?",
-                "What is your opponent's position trying to do — and which of your plans prevents it best?",
-            ),
-            conceptualHint = "In complex positions, the question is not 'What is the best move?' " +
-                "but 'Which plan is best?' Compare concrete variations: " +
-                "Plan A may win a pawn but open your king; Plan B may be slower but safer. " +
-                "Articulating why one plan beats another is the core skill of positional chess.",
-        )
+        is CoachingTrigger.CandidateSearch -> {
+            val evalContext = when {
+                trigger.evalCp > 200  -> "You hold a comfortable advantage."
+                trigger.evalCp > 50   -> "You are slightly ahead — the position favors you."
+                trigger.evalCp >= -50 -> "The position is roughly equal."
+                trigger.evalCp >= -200 -> "You are slightly behind — look for the most resilient plan."
+                else                  -> "You are under significant pressure."
+            }
+            Insight(
+                emoji       = "🔍",
+                title       = "Candidate Search",
+                description = "$evalContext This position is rich with possibilities — multiple plans exist with " +
+                    "very different tactical and strategic consequences.",
+                questions   = listOf(
+                    "Can you find two different plans — one more aggressive, one more solid — and name them?",
+                    "Why is Plan A better than Plan B in this specific pawn structure and piece placement?",
+                    "What is your opponent's position trying to do — and which of your plans prevents it best?",
+                ),
+                conceptualHint = "In complex positions, the question is not 'What is the best move?' " +
+                    "but 'Which plan is best?' Compare concrete variations: " +
+                    "Plan A may win a pawn but open your king; Plan B may be slower but safer. " +
+                    "Articulating why one plan beats another is the core skill of positional chess.",
+            )
+        }
 
         is CoachingTrigger.CctCheck -> Insight(
             emoji       = "✔️",

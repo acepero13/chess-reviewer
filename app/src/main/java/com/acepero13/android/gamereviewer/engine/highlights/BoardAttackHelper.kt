@@ -190,12 +190,11 @@ object BoardAttackHelper {
 
     /**
      * Clones the board, applies the capture [attackerSq] → [targetSq], then counts
-     * how many [defenderSide] pieces can pseudo-legally move to [targetSq] (potential recaptors).
+     * how many [defenderSide] pieces can legally move to [targetSq] (potential recaptors).
      *
-     * Pseudo-legal moves are used intentionally: we want to count pinned pieces as
-     * defenders so that the pre-move checklist only highlights *obviously* undefended
-     * pieces. A piece defended by a pinned piece is a subtle tactical motif beyond the
-     * scope of a quick board-scan habit prompt.
+     * Legal moves are used so that pinned pieces are NOT counted as recaptors: a piece
+     * pinned to its king cannot legally move to recapture, therefore the target square
+     * is genuinely undefended in such positions.
      *
      * Returns -1 on any error so callers conservatively treat the capture as illegal (not hanging).
      */
@@ -217,10 +216,10 @@ object BoardAttackHelper {
         val captureMove = MoveGenerator.generateLegalMoves(clone)
             .firstOrNull { it.from == attackerSq && it.to == targetSq } ?: return -1
         clone.doMove(captureMove)
-        // After the capture clone.sideToMove == defenderSide, so generatePseudoLegalMoves
-        // produces the defender's moves. Pseudo-legal (not strictly legal) so pinned pieces
-        // are counted as recaptors — see doc above.
-        MoveGenerator.generatePseudoLegalMoves(clone)
+        // After the capture clone.sideToMove == defenderSide, so generateLegalMoves
+        // produces the defender's moves. Legal moves correctly exclude pinned pieces —
+        // a pinned defender cannot physically recapture.
+        MoveGenerator.generateLegalMoves(clone)
             .count { it.to == targetSq && clone.getPiece(it.from).pieceSide == defenderSide }
     }.getOrDefault(-1)
 

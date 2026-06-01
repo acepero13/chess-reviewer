@@ -196,6 +196,20 @@ data class AnalysisUiState(
     val blunderPreMoveFen: String = "",
     val blunderCpLoss: Int = 0,
 
+    // ── Forcing sequence explorer ────────────────────────────────────────────
+    /** True when the user is in "try the forcing sequence" challenge mode. */
+    val forcingSequenceMode: Boolean = false,
+    /** True while the engine PV is being animated on the board. */
+    val forcingSequenceAnimating: Boolean = false,
+    /** True once the animation has finished (user can replay or explore freely). */
+    val forcingSequenceComplete: Boolean = false,
+    /** Parsed UCI moves of the forcing sequence to animate. */
+    val forcingSequencePvMoves: List<String> = emptyList(),
+    /** FEN at the start of the forcing sequence (used for replay). */
+    val forcingSequenceStartFen: String = "",
+    /** Which step of the animation is currently visible (0 = not started). */
+    val forcingSequenceCurrentStep: Int = 0,
+
     // ── Critical moments for this game ──────────────────────────────────────
     val criticalMoments: List<CriticalMoment> = emptyList(),
 
@@ -379,6 +393,8 @@ class AnalysisViewModel(
     private val middlegamePlanDetector: com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector,
 ) : ViewModel() {
 
+    private val tag = "$TAG[game=$gameId]"
+
     private val _uiState = MutableStateFlow(AnalysisUiState())
     val uiState: StateFlow<AnalysisUiState> = _uiState.asStateFlow()
 
@@ -411,27 +427,27 @@ class AnalysisViewModel(
 
     /** Navigate to position [index]. Ignored when Mentor mode is active (navigation frozen). */
     fun goToMove(index: Int) {
-        Log.d(TAG, "goToMove($index) — reviewMode=${_uiState.value.reviewMode} uciMoves.size=${uciMoves.size} fenSequence.size=${fenSequence.size}")
+        Log.d(tag, "goToMove($index) — reviewMode=${_uiState.value.reviewMode} uciMoves.size=${uciMoves.size} fenSequence.size=${fenSequence.size}")
         if (_uiState.value.reviewMode == ReviewMode.MENTOR) {
-            Log.d(TAG, "goToMove: BLOCKED (mentor/guided discovery active)")
+            Log.d(tag, "goToMove: BLOCKED (mentor/guided discovery active)")
             return
         }
         // Diagnostic: if uciMoves is still empty, log the raw DB fields so we can see why
         if (uciMoves.isEmpty()) {
             val game = _uiState.value.game
-            Log.e(TAG, "goToMove: uciMoves empty! game=${game?.let { "'${it.whitePlayer} vs ${it.blackPlayer}' movesUci.length=${it.movesUci.length} movesUci_preview='${it.movesUci.take(60)}' pgn.length=${it.pgn.length} pgn_preview='${it.pgn.take(120)}'" } ?: "null"}")
+            Log.e(tag, "goToMove: uciMoves empty! game=${game?.let { "'${it.whitePlayer} vs ${it.blackPlayer}' movesUci.length=${it.movesUci.length} movesUci_preview='${it.movesUci.take(60)}' pgn.length=${it.pgn.length} pgn_preview='${it.pgn.take(120)}'" } ?: "null"}")
         }
         val clamped = index.coerceIn(0, uciMoves.size)
-        Log.d(TAG, "goToMove: clamped=$clamped  currentMoveIndex=${_uiState.value.moveIndex}")
+        Log.d(tag, "goToMove: clamped=$clamped  currentMoveIndex=${_uiState.value.moveIndex}")
         val prev    = _uiState.value.moveIndex
         if (clamped > prev) checkMissedMoments(fromIndex = prev, toIndex = clamped)
         viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(clamped) }
     }
 
-    fun stepForward()  { Log.d(TAG, "stepForward  moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex + 1) }
-    fun stepBackward() { Log.d(TAG, "stepBackward moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex - 1) }
-    fun goToStart()    { Log.d(TAG, "goToStart");  goToMove(0) }
-    fun goToEnd()      { Log.d(TAG, "goToEnd");    goToMove(uciMoves.size) }
+    fun stepForward()  { Log.d(tag, "stepForward  moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex + 1) }
+    fun stepBackward() { Log.d(tag, "stepBackward moveIndex=${_uiState.value.moveIndex}"); goToMove(_uiState.value.moveIndex - 1) }
+    fun goToStart()    { Log.d(tag, "goToStart");  goToMove(0) }
+    fun goToEnd()      { Log.d(tag, "goToEnd");    goToMove(uciMoves.size) }
 
     /** Called when the user taps a move chip in the MoveTree. */
     fun onMoveNodeClick(nodeId: Long) = goToMove(nodeId.toInt())
@@ -2000,14 +2016,129 @@ class AnalysisViewModel(
         val idx = _uiState.value.moveIndex
         _uiState.update {
             it.copy(
-                sandboxMode           = false,
-                blunderGuardActive    = false,
-                blunderReflectionMode = false,
-                sandboxEngineThinking = false,
-                analyseSubMode        = AnalyseSubMode.VIEW,
+                sandboxMode              = false,
+                blunderGuardActive       = false,
+                blunderReflectionMode    = false,
+                sandboxEngineThinking    = false,
+                analyseSubMode           = AnalyseSubMode.VIEW,
+                forcingSequenceMode      = false,
+                forcingSequenceAnimating = false,
+                forcingSequenceComplete  = false,
+                forcingSequencePvMoves   = emptyList(),
+                forcingSequenceStartFen  = "",
+                forcingSequenceCurrentStep = 0,
             )
         }
         viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
+    }
+
+    // ── Forcing sequence explorer ─────────────────────────────────────────────
+
+    fun enterForcingSequenceMode() {
+        val state = _uiState.value
+        val pvLine = truthMap.find { it.moveIndex == state.moveIndex }?.pvLine ?: ""
+        val pvMoves = pvLine.split(",").filter { it.isNotBlank() }
+        val startFen = state.boardState.fen
+        _uiState.update {
+            it.copy(
+                forcingSequenceMode    = true,
+                forcingSequencePvMoves = pvMoves,
+                forcingSequenceStartFen = startFen,
+                forcingSequenceCurrentStep = 0,
+                forcingSequenceComplete    = false,
+                forcingSequenceAnimating   = false,
+            )
+        }
+        enterSandboxMode()
+    }
+
+    fun showForcingSequence() {
+        val state    = _uiState.value
+        val startFen = state.forcingSequenceStartFen.ifBlank { state.boardState.fen }
+
+        // Re-open panel so animation progress is visible (works in any reviewMode)
+        _uiState.update { it.copy(showProactiveCoaching = true) }
+
+        val cachedPv = state.forcingSequencePvMoves.ifEmpty {
+            val pvLine = truthMap.find { it.moveIndex == state.moveIndex }?.pvLine ?: ""
+            pvLine.split(",").filter { it.isNotBlank() }
+        }
+
+        viewModelScope.launch(Dispatchers.Default) {
+            val pvMoves = if (cachedPv.isNotEmpty()) {
+                cachedPv
+            } else {
+                // Game was analyzed before pvLine support — fetch PV live from engine
+                val result = runCatching {
+                    engine.analyzePosition(startFen, ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+                }.getOrNull()
+                result?.pv?.take(ChessConstants.MAX_FORCING_SEQUENCE_DEPTH)?.filter { it.isNotBlank() }
+                    ?: emptyList()
+            }
+            if (pvMoves.isEmpty()) {
+                _uiState.update { it.copy(showProactiveCoaching = false) }
+                return@launch
+            }
+            _uiState.update { it.copy(forcingSequencePvMoves = pvMoves, forcingSequenceStartFen = startFen) }
+            animatePvMoves(startFen, pvMoves)
+        }
+    }
+
+    fun replayForcingSequence() {
+        _uiState.update {
+            it.copy(
+                forcingSequenceCurrentStep = 0,
+                forcingSequenceComplete    = false,
+            )
+        }
+        showForcingSequence()
+    }
+
+    fun exitForcingSequenceMode() {
+        exitSandboxMode()
+    }
+
+    private suspend fun animatePvMoves(startFen: String, pvMoves: List<String>) {
+        _uiState.update {
+            it.copy(
+                forcingSequenceAnimating   = true,
+                forcingSequenceCurrentStep = 0,
+                boardState = it.boardState.copy(fen = startFen, selectedSquare = null, legalMoves = emptyList()),
+            )
+        }
+        val board = Board().apply { loadFromFen(startFen) }
+        pvMoves.take(ChessConstants.MAX_FORCING_SEQUENCE_DEPTH).forEachIndexed { index, uci ->
+            if (uci.length < 4) return@forEachIndexed
+            val from = runCatching { Square.valueOf(uci.substring(0, 2).uppercase()) }.getOrNull() ?: return@forEachIndexed
+            val to   = runCatching { Square.valueOf(uci.substring(2, 4).uppercase()) }.getOrNull() ?: return@forEachIndexed
+            val move = if (uci.length == 5) {
+                val side = board.sideToMove
+                val prom = when (uci[4].lowercaseChar()) {
+                    'r' -> if (side == Side.WHITE) Piece.WHITE_ROOK   else Piece.BLACK_ROOK
+                    'b' -> if (side == Side.WHITE) Piece.WHITE_BISHOP else Piece.BLACK_BISHOP
+                    'n' -> if (side == Side.WHITE) Piece.WHITE_KNIGHT else Piece.BLACK_KNIGHT
+                    else -> if (side == Side.WHITE) Piece.WHITE_QUEEN  else Piece.BLACK_QUEEN
+                }
+                Move(from, to, prom)
+            } else {
+                Move(from, to)
+            }
+            board.doMove(move)
+            val newFen = board.fen
+            _uiState.update { st ->
+                st.copy(
+                    boardState = st.boardState.copy(fen = newFen, lastMove = move),
+                    forcingSequenceCurrentStep = index + 1,
+                )
+            }
+            delay(ChessConstants.FORCING_SEQUENCE_STEP_DELAY_MS)
+        }
+        _uiState.update {
+            it.copy(
+                forcingSequenceAnimating = false,
+                forcingSequenceComplete  = true,
+            )
+        }
     }
 
     fun onSandboxSquareTap(square: Square) {
@@ -2080,9 +2211,9 @@ class AnalysisViewModel(
     private fun loadGame() {
         viewModelScope.launch(Dispatchers.IO) {
             val game = repo.findById(gameId) ?: run {
-                Log.e(TAG, "loadGame: game $gameId NOT FOUND in DB"); return@launch
+                Log.e(tag, "loadGame: game $gameId NOT FOUND in DB"); return@launch
             }
-            Log.d(TAG, "loadGame: found game '${game.whitePlayer} vs ${game.blackPlayer}' movesUci.length=${game.movesUci.length} pgn.length=${game.pgn.length}")
+            Log.d(tag, "loadGame: found game '${game.whitePlayer} vs ${game.blackPlayer}' movesUci.length=${game.movesUci.length} pgn.length=${game.pgn.length}")
 
             // ── Settings ──────────────────────────────────────────────────────
             val positionCoachEnabled = settingsRepo.positionCoachEnabled.first()
@@ -2102,22 +2233,22 @@ class AnalysisViewModel(
             playerSideKnown = username.isNotEmpty() &&
                 (game.whitePlayer.equals(username, ignoreCase = true) ||
                  game.blackPlayer.equals(username, ignoreCase = true))
-            Log.d(TAG, "loadGame: username='$username' flippedForBlack=$boardFlippedForBlack playerSideKnown=$playerSideKnown")
+            Log.d(tag, "loadGame: username='$username' flippedForBlack=$boardFlippedForBlack playerSideKnown=$playerSideKnown")
 
             // If movesUci is blank the game was imported before the PGN-comment-stripping
             // fix landed.  Re-parse on the fly from the stored raw PGN so the user doesn't
             // need to re-import.
             val rawUci = if (game.movesUci.isNotBlank()) {
-                Log.d(TAG, "loadGame: using stored movesUci")
+                Log.d(tag, "loadGame: using stored movesUci")
                 game.movesUci
             } else {
-                Log.w(TAG, "loadGame: movesUci is blank — falling back to raw PGN parse")
+                Log.w(tag, "loadGame: movesUci is blank — falling back to raw PGN parse")
                 extractUciMovesFromFullPgn(game.pgn)
             }
             uciMoves = rawUci.split(' ').filter { it.isNotBlank() }
-            Log.d(TAG, "loadGame: uciMoves.size=${uciMoves.size}  first3=${uciMoves.take(3)}")
+            Log.d(tag, "loadGame: uciMoves.size=${uciMoves.size}  first3=${uciMoves.take(3)}")
             buildFenAndSanSequence()
-            Log.d(TAG, "loadGame: fenSequence.size=${fenSequence.size}  sanMoves.size=${sanMoves.size}")
+            Log.d(tag, "loadGame: fenSequence.size=${fenSequence.size}  sanMoves.size=${sanMoves.size}")
 
             // Pre-warm annotation cache so navigation never needs runBlocking on the main thread.
             for (fen in fenSequence) {
@@ -2131,12 +2262,12 @@ class AnalysisViewModel(
             val deviation     = withContext(Dispatchers.Default) {
                 runCatching { deviationAnalyzer.analyze(uciMoves, sanMoves) }.getOrNull()
             }
-            Log.d(TAG, "loadGame: openingDeviation=$deviation")
+            Log.d(tag, "loadGame: openingDeviation=$deviation")
 
             val endgameClassification = withContext(Dispatchers.Default) {
                 runCatching { endgameRecognizer.analyze(fenSequence) }.getOrNull()
             }
-            Log.d(TAG, "loadGame: endgameClassification=$endgameClassification")
+            Log.d(tag, "loadGame: endgameClassification=$endgameClassification")
             endgameClassification?.let { ec ->
                 val existing = endgameEncounterDao.getByGameId(gameId)
                 if (existing == null) {
@@ -2163,7 +2294,7 @@ class AnalysisViewModel(
                     )
                 }.getOrNull()
             }
-            Log.d(TAG, "loadGame: middlegamePlanClassification=$middlegamePlanClassification")
+            Log.d(tag, "loadGame: middlegamePlanClassification=$middlegamePlanClassification")
 
             _uiState.update {
                 it.copy(
@@ -2191,24 +2322,24 @@ class AnalysisViewModel(
             sans.add(runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci))
             val move = uciToMove(board, uci)
             if (move == null) {
-                Log.e(TAG, "buildFenAndSanSequence: uciToMove returned null for '$uci' at index $idx — stopping")
+                Log.e(tag, "buildFenAndSanSequence: uciToMove returned null for '$uci' at index $idx — stopping")
                 break
             }
             val applied = board.doMove(move)
             if (!applied) {
-                Log.e(TAG, "buildFenAndSanSequence: board.doMove($uci) returned FALSE at index $idx — stopping")
+                Log.e(tag, "buildFenAndSanSequence: board.doMove($uci) returned FALSE at index $idx — stopping")
                 break
             }
             fens.add(board.fen)
         }
-        Log.d(TAG, "buildFenAndSanSequence: built ${fens.size} FENs for ${uciMoves.size} moves")
+        Log.d(tag, "buildFenAndSanSequence: built ${fens.size} FENs for ${uciMoves.size} moves")
         fenSequence = fens
         sanMoves    = sans
     }
 
     private fun applyMoveIndex(index: Int) {
         val fen = fenSequence.getOrElse(index) { START_FEN }
-        Log.d(TAG, "applyMoveIndex($index): fenSequence.size=${fenSequence.size}  fen=${fen.take(40)}")
+        Log.d(tag, "applyMoveIndex($index): fenSequence.size=${fenSequence.size}  fen=${fen.take(40)}")
         val lastMove   = if (index > 0) uciToMoveFromFens(index) else null
         val annot      = getCachedAnnotation(fen)
         val arrows     = annot?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
@@ -2282,7 +2413,7 @@ class AnalysisViewModel(
                 proactiveFoundSquares       = emptySet(),
             )
         }
-        Log.d(TAG, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")
+        Log.d(tag, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")
 
         // Trigger post-game debrief when user reaches the final position
         val st = _uiState.value
@@ -2369,6 +2500,7 @@ class AnalysisViewModel(
                             evalCp    = ev.evalCp,
                             evalDelta = ev.evalDelta,
                             motif     = ev.motif,
+                            pvLine    = ev.pvLine,
                         )
                     }
                 }
@@ -2384,13 +2516,14 @@ class AnalysisViewModel(
                         fenByMoveIndex = { idx -> fenSequence.getOrElse(idx) { "" } },
                         timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
                         playerIsWhite  = !boardFlippedForBlack,
+                        gameId         = gameId,
                     )
                 }
-                Log.d(TAG, "CoachTrigger (DB restore re-eval): ${allTriggers.values.sumOf { it.size }} triggers across ${allTriggers.size} positions  mastered=$mastered")
+                Log.d(tag, "CoachTrigger (DB restore re-eval): ${allTriggers.values.sumOf { it.size }} triggers across ${allTriggers.size} positions  mastered=$mastered")
                 val restoredTriggers: Map<Int, List<CoachingTrigger>> = allTriggers
                     .mapValues { (_, triggers) -> triggers.filter { it.typeName() !in mastered } }
                     .filter { (_, triggers) -> triggers.isNotEmpty() }
-                Log.d(TAG, "CoachTrigger (DB restore): restoredTriggers.size=${restoredTriggers.size}  keys=${restoredTriggers.keys.take(10)}")
+                Log.d(tag, "CoachTrigger (DB restore): restoredTriggers.size=${restoredTriggers.size}  keys=${restoredTriggers.keys.take(10)}")
 
                 // Run highlights against the restored truth map (moveTimes already fetched above)
                 val highlights = GameHighlightEngine.run(
@@ -2435,6 +2568,7 @@ class AnalysisViewModel(
                     evalCp    = entry.evalCp,
                     evalDelta = entry.evalDelta,
                     motif     = entry.motif,
+                    pvLine    = entry.pvLine,
                 )
             }
             if (evaluations.isNotEmpty()) {
@@ -2452,17 +2586,18 @@ class AnalysisViewModel(
                 fenByMoveIndex  = { idx -> fenSequence.getOrElse(idx) { "" } },
                 timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
                 playerIsWhite   = !boardFlippedForBlack,
+                gameId          = gameId,
             )
-            Log.d(TAG, "CoachTrigger: ${allTriggers.values.sumOf { it.size }} raw triggers across ${allTriggers.size} positions — by type: ${allTriggers.values.flatten().groupBy { it.typeName() }.mapValues { it.value.size }}")
-            Log.d(TAG, "CoachTrigger: fenSequence.size=${fenSequence.size}  evaluations.size=${evaluations.size}  sampleEvalDeltas=${evaluations.take(5).map { it.evalDelta }}  sampleMotifs=${evaluations.take(5).map { it.motif }}")
+            Log.d(tag, "CoachTrigger: ${allTriggers.values.sumOf { it.size }} raw triggers across ${allTriggers.size} positions — by type: ${allTriggers.values.flatten().groupBy { it.typeName() }.mapValues { it.value.size }}")
+            Log.d(tag, "CoachTrigger: fenSequence.size=${fenSequence.size}  evaluations.size=${evaluations.size}  sampleEvalDeltas=${evaluations.take(5).map { it.evalDelta }}  sampleMotifs=${evaluations.take(5).map { it.motif }}")
 
             // Filter out trigger types the user has already mastered
             val masteredTypes  = masteryRepo.getMasteredTypes()
-            Log.d(TAG, "CoachTrigger: masteredTypes=$masteredTypes")
+            Log.d(tag, "CoachTrigger: masteredTypes=$masteredTypes")
             val triggerMap     = allTriggers.mapValues { (_, triggers) ->
                 triggers.filter { it.typeName() !in masteredTypes }
             }.filter { (_, triggers) -> triggers.isNotEmpty() }
-            Log.d(TAG, "CoachTrigger: after mastery filter — ${triggerMap.size} positions remain, keys=${triggerMap.keys.take(10)}")
+            Log.d(tag, "CoachTrigger: after mastery filter — ${triggerMap.size} positions remain, keys=${triggerMap.keys.take(10)}")
 
             _uiState.update { it.copy(triggersByMove = triggerMap) }
             // Persist the full (unfiltered) trigger data for future sessions
@@ -2695,7 +2830,7 @@ class AnalysisViewModel(
         val result = runCatching {
             engine.analyzePosition(fen, depth = ChessConstants.DEFAULT_ANALYSIS_DEPTH)
         }.getOrNull() ?: run {
-            Log.w(TAG, "fetchOnDemandEval: engine returned null for fen=${fen.take(40)}")
+            Log.w(tag, "fetchOnDemandEval: engine returned null for fen=${fen.take(40)}")
             return
         }
         val board  = Board().apply { loadFromFen(fen) }
@@ -2714,7 +2849,7 @@ class AnalysisViewModel(
         val result = runCatching {
             engine.analyzePosition(fen, depth = 10)
         }.getOrNull() ?: run {
-            Log.w(TAG, "fetchOnDemandBestMove: engine returned null for fen=${fen.take(40)}")
+            Log.w(tag, "fetchOnDemandBestMove: engine returned null for fen=${fen.take(40)}")
             return
         }
         val arrow = result.toArrow()
@@ -2728,7 +2863,7 @@ class AnalysisViewModel(
                 )
             }
             if (arrow == null) {
-                Log.w(TAG, "fetchOnDemandBestMove: no valid arrow for fen=${fen.take(40)} bestMove='${result.bestMoveUci}'")
+                Log.w(tag, "fetchOnDemandBestMove: no valid arrow for fen=${fen.take(40)} bestMove='${result.bestMoveUci}'")
             }
         }
     }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,12 +25,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +84,14 @@ fun ProactiveCoachingPanel(
     proactiveTotalCount:      Int = 0,
     coordinationQuizPhase:    CoordinationQuizPhase = CoordinationQuizPhase.ASKING,
     onCoordinationReveal:     (() -> Unit)? = null,
+    onTryForcingSequence:     (() -> Unit)? = null,
+    onShowForcingSequence:    (() -> Unit)? = null,
+    onReplayForcingSequence:  (() -> Unit)? = null,
+    forcingSequenceMode:      Boolean = false,
+    forcingSequenceAnimating:  Boolean = false,
+    forcingSequenceComplete:   Boolean = false,
+    forcingSequenceCurrentStep: Int = 0,
+    forcingSequenceTotalSteps:  Int = 0,
 ) {
     val insight = InsightReconciler.forTrigger(trigger)
     val hasAnswer = trigger.supportsSquareAnswer()
@@ -294,6 +305,143 @@ fun ProactiveCoachingPanel(
                     fontStyle = FontStyle.Italic,
                 )
 
+                // ── Forcing sequence explorer (ForcingMove trigger only) ───────
+                if (trigger is CoachingTrigger.ForcingMove) {
+                    HorizontalDivider(color = PanelBorder.copy(alpha = 0.25f))
+                    when {
+                        forcingSequenceAnimating -> {
+                            val progress = if (forcingSequenceTotalSteps > 0)
+                                forcingSequenceCurrentStep.toFloat() / forcingSequenceTotalSteps
+                            else 0f
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text  = "Watching the forcing sequence…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PanelText.copy(alpha = 0.85f),
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                LinearProgressIndicator(
+                                    progress  = { progress },
+                                    modifier  = Modifier.fillMaxWidth(),
+                                    color     = AnalyzeBlue,
+                                    trackColor = PanelBorder.copy(alpha = 0.3f),
+                                )
+                                Text(
+                                    text  = "Move $forcingSequenceCurrentStep of $forcingSequenceTotalSteps",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = PanelText.copy(alpha = 0.5f),
+                                )
+                            }
+                        }
+                        forcingSequenceComplete -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text  = "Sequence complete. You can now explore variations freely.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AnalyzeBlue.copy(alpha = 0.9f),
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    OutlinedButton(
+                                        onClick  = { onReplayForcingSequence?.invoke() },
+                                        modifier = Modifier.weight(1f),
+                                        shape    = RoundedCornerShape(8.dp),
+                                        border   = BorderStroke(1.dp, AnalyzeBlue.copy(alpha = 0.7f)),
+                                    ) {
+                                        Text(
+                                            text  = "Replay",
+                                            color = AnalyzeBlue,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick  = onDismiss,
+                                        modifier = Modifier.weight(1f),
+                                        shape    = RoundedCornerShape(8.dp),
+                                        border   = BorderStroke(1.dp, PanelBorder.copy(alpha = 0.5f)),
+                                    ) {
+                                        Text(
+                                            text  = "Explore freely",
+                                            color = PanelText.copy(alpha = 0.7f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        forcingSequenceMode -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text  = "You're in sandbox mode. Play what you think is the forcing continuation.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PanelText.copy(alpha = 0.85f),
+                                    fontStyle = FontStyle.Italic,
+                                )
+                                Button(
+                                    onClick  = { onShowForcingSequence?.invoke() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape    = RoundedCornerShape(8.dp),
+                                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2D2D)),
+                                ) {
+                                    Text(
+                                        text       = "Give up — show the sequence",
+                                        color      = PanelText.copy(alpha = 0.8f),
+                                        style      = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                        else -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text  = "There's a forcing sequence here. Can you find it?",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ChessGold.copy(alpha = 0.9f),
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Button(
+                                        onClick  = {
+                                            onTryForcingSequence?.invoke()
+                                            onDismiss()
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        shape    = RoundedCornerShape(8.dp),
+                                        colors   = ButtonDefaults.buttonColors(containerColor = PanelBorder),
+                                    ) {
+                                        Text(
+                                            text       = "Try it out",
+                                            color      = Color.White,
+                                            style      = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick  = { onShowForcingSequence?.invoke() },
+                                        modifier = Modifier.weight(1f),
+                                        shape    = RoundedCornerShape(8.dp),
+                                        border   = BorderStroke(1.dp, PanelBorder.copy(alpha = 0.5f)),
+                                    ) {
+                                        Text(
+                                            text  = "Just show me",
+                                            color = PanelText.copy(alpha = 0.7f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── Coordination visual quiz ───────────────────────────────────
                 val isCoordinationTrigger = trigger is CoachingTrigger.CoordinatedAttack ||
                         trigger is CoachingTrigger.PieceHarmony
@@ -355,8 +503,9 @@ fun ProactiveCoachingPanel(
                     }
                 }
 
-                // ── Free-text reflection (Socratic-only triggers) ──────────────
-                if (!hasAnswer && !isCoordinationTrigger) {
+                // ── Free-text reflection (Socratic-only triggers, not ForcingMove) ──
+                val isForcingMoveTrigger = trigger is CoachingTrigger.ForcingMove
+                if (!hasAnswer && !isCoordinationTrigger && !isForcingMoveTrigger) {
                     HorizontalDivider(color = PanelBorder.copy(alpha = 0.25f))
 
                     if (savedReflection.isNotEmpty()) {
@@ -412,19 +561,21 @@ fun ProactiveCoachingPanel(
                     }
                 }
 
-                // ── Dismiss ────────────────────────────────────────────────────
-                Spacer(Modifier.height(2.dp))
-                Button(
-                    onClick  = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape    = RoundedCornerShape(8.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = PanelBorder),
-                ) {
-                    Text(
-                        text       = "Got it — continue",
-                        fontWeight = FontWeight.SemiBold,
-                        color      = Color.White,
-                    )
+                // ── Dismiss (hidden while forcing sequence is animating) ────────
+                if (!forcingSequenceAnimating) {
+                    Spacer(Modifier.height(2.dp))
+                    Button(
+                        onClick  = onDismiss,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape    = RoundedCornerShape(8.dp),
+                        colors   = ButtonDefaults.buttonColors(containerColor = PanelBorder),
+                    ) {
+                        Text(
+                            text       = "Got it — continue",
+                            fontWeight = FontWeight.SemiBold,
+                            color      = Color.White,
+                        )
+                    }
                 }
             }
         }
