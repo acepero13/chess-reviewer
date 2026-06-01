@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="piece_burgundy">#4C0027</color>
+    <color name="piece_white">#ECB390</color>
+    <color name="ic_launcher_background">#ECB390</color>
+</resources>

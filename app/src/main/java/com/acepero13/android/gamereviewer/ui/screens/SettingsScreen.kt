@@ -62,11 +62,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.decode.SvgDecoder
 import coil.request.ImageRequest
+import com.acepero13.android.gamereviewer.BuildConfig
 import com.acepero13.chess.core.ui.board.EXTERNAL_THEMES
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.LocalAppColors
@@ -415,6 +417,14 @@ fun SettingsScreen(
             }
 
             // Bottom padding so last item isn't clipped by the nav bar
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Version ${BuildConfig.VERSION_NAME}",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.labelSmall,
+                color = appColors.textTertiary,
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(32.dp))
         }
     }
