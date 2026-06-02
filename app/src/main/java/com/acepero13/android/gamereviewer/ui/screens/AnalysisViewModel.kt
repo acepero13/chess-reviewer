@@ -362,6 +362,9 @@ data class AnalysisUiState(
     val gameStory: String = "",
     /** True once the user has dismissed the story card. */
     val gameStoryDismissed: Boolean = false,
+    /** Sticky flag — true once the session ends (user reaches the last move) or
+     *  when structured analysis prompts are enabled.  Never resets to false. */
+    val gameStoryUnlocked: Boolean = false,
 
     // ── Post-game debrief ─────────────────────────────────────────────────────
     /** True when the user has navigated to the end of the game and analysis is done. */
@@ -2306,6 +2309,7 @@ class AnalysisViewModel(
                 it.copy(
                     positionCoachEnabled = positionCoachEnabled,
                     developerModeEnabled = developerModeEnabled,
+                    gameStoryUnlocked    = it.gameStoryUnlocked || positionCoachEnabled,
                 )
             }
 
@@ -2503,7 +2507,7 @@ class AnalysisViewModel(
         val st = _uiState.value
         if (index == uciMoves.size && st.isBackgroundAnalysisDone && !st.showPostGameDebrief) {
             val result = buildDebrief(st.gamePrediction, st.criticalMoments)
-            _uiState.update { it.copy(showPostGameDebrief = true, predictionMatchResult = result) }
+            _uiState.update { it.copy(showPostGameDebrief = true, predictionMatchResult = result, gameStoryUnlocked = true) }
         }
 
         // Keep engine-toggle overlays in sync when navigating in Analyse mode
@@ -2632,6 +2636,7 @@ class AnalysisViewModel(
                         gameStory                  = story,
                         showPostGameDebrief        = st.showPostGameDebrief || atEnd,
                         predictionMatchResult      = matchResult,
+                        gameStoryUnlocked          = st.gameStoryUnlocked || atEnd,
                     )
                 }
                 // Check if the user already navigated past unreviewed critical moments
@@ -2747,6 +2752,7 @@ class AnalysisViewModel(
                     gameStory                  = story,
                     showPostGameDebrief        = st.showPostGameDebrief || atEnd,
                     predictionMatchResult      = matchResult,
+                    gameStoryUnlocked          = st.gameStoryUnlocked || atEnd,
                 )
             }
             // Check if the user navigated past unreviewed critical positions while analysis ran

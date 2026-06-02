@@ -242,7 +242,7 @@ fun AnalysisScreen(
     var boardCollapsed by remember { mutableStateOf(false) }
 
     LaunchedEffect(hasCoachContent) {
-        boardCollapsed = hasCoachContent
+        if (!hasCoachContent) boardCollapsed = false
     }
 
     Scaffold(
@@ -522,7 +522,7 @@ fun AnalysisScreen(
                         // Game story headline — dismissable narrative summary
                         GameStoryCard(
                             story     = state.gameStory,
-                            visible   = !state.gameStoryDismissed,
+                            visible   = state.gameStoryUnlocked && !state.gameStoryDismissed,
                             onDismiss = vm::dismissGameStory,
                             modifier  = Modifier.fillMaxWidth(),
                         )

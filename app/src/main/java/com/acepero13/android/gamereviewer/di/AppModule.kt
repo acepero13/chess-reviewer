@@ -97,6 +97,7 @@ val appModule = module {
             moveTimeDao       = get(),
             criticalMomentDao = get(),
             settingsRepo      = get(),
+            openingClassifier = get(),
         )
     }
     viewModel { DashboardViewModel(get(), get(), get(), get()) }

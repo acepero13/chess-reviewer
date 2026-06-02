@@ -1,5 +1,6 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,12 +23,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,6 +65,7 @@ fun GameReportScreen(
     vm: GameReportViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state by vm.uiState.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
         containerColor = WCDark,
@@ -113,51 +120,88 @@ fun GameReportScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(padding),
         ) {
-
-            // ── Narrative summary ─────────────────────────────────────────────
-            state.narrative?.let { NarrativeSummaryCard(it) }
-
-            // ── Decision Velocity chart ────────────────────────────────────────
-            if (state.hasTimeData) {
-                DecisionVelocityChart(
-                    decisions    = state.decisions,
-                    modifier     = Modifier.fillMaxWidth(),
-                    onMoveClick  = onNavigateToMove,
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor   = WCDark,
+                contentColor     = ChessGold,
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick  = { selectedTab = 0 },
+                    text     = { Text("Overview", style = MaterialTheme.typography.labelMedium) },
                 )
-            } else {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Text(
-                        text     = "⏱ No clock data in PGN — time analysis unavailable.\n" +
-                            "Import games from Chess.com or Lichess for time tracking.",
-                        style    = MaterialTheme.typography.bodySmall,
-                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick  = { selectedTab = 1 },
+                    text     = { Text("Moves List", style = MaterialTheme.typography.labelMedium) },
+                )
+            }
+
+            AnimatedContent(
+                targetState = selectedTab,
+                label       = "report_tab",
+            ) { tab ->
+                when (tab) {
+                    0 -> OverviewTabContent(state, onNavigateToMove)
+                    1 -> MoveListTab(entries = state.moveListEntries)
                 }
             }
-
-            // ── Summary stats ─────────────────────────────────────────────────
-            if (state.decisions.isNotEmpty()) {
-                StatsSectionCard(state = state)
-            }
-
-            // ── Eval-only summary when no time data ───────────────────────────
-            if (!state.hasTimeData && state.evaluations.isNotEmpty()) {
-                EvalOnlySummaryCard(evaluations = state.evaluations)
-            }
-
-            Spacer(Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun OverviewTabContent(
+    state: GameReportUiState,
+    onNavigateToMove: (moveIndex: Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        // ── Narrative summary ─────────────────────────────────────────────
+        state.narrative?.let { NarrativeSummaryCard(it) }
+
+        // ── Decision Velocity chart ────────────────────────────────────────
+        if (state.hasTimeData) {
+            DecisionVelocityChart(
+                decisions    = state.decisions,
+                modifier     = Modifier.fillMaxWidth(),
+                onMoveClick  = onNavigateToMove,
+            )
+        } else {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text(
+                    text     = "⏱ No clock data in PGN — time analysis unavailable.\n" +
+                        "Import games from Chess.com or Lichess for time tracking.",
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
+
+        // ── Summary stats ─────────────────────────────────────────────────
+        if (state.decisions.isNotEmpty()) {
+            StatsSectionCard(state = state)
+        }
+
+        // ── Eval-only summary when no time data ───────────────────────────
+        if (!state.hasTimeData && state.evaluations.isNotEmpty()) {
+            EvalOnlySummaryCard(evaluations = state.evaluations)
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
