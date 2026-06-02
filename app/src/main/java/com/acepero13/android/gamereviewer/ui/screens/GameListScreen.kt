@@ -1,15 +1,18 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -54,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
@@ -72,6 +76,7 @@ fun GameListScreen(
 ) {
     val games    by vm.games.collectAsState()
     val filter   by vm.filter.collectAsState()
+    val username by vm.username.collectAsState()
     val appColors = LocalAppColors.current
 
     var showFilters by remember { mutableStateOf(false) }
@@ -185,6 +190,7 @@ fun GameListScreen(
                     items(games, key = { it.id }) { game ->
                         GameRow(
                             game     = game,
+                            username = username,
                             onClick  = { onOpenAnalysis(game.id) },
                             onDelete = {
                                 scope.launch {
@@ -296,43 +302,68 @@ private fun SmallFilterChip(label: String, selected: Boolean, onClick: () -> Uni
 
 // ── Game row ──────────────────────────────────────────────────────────────────
 
+private fun outcomeColor(game: ReviewGame, username: String): Color {
+    val user = username.trim().lowercase()
+    val white = game.whitePlayer.trim().lowercase()
+    val black = game.blackPlayer.trim().lowercase()
+    return when (game.result) {
+        "1/2-1/2" -> Color(0xFFFFB300)
+        "1-0" -> if (user.isNotEmpty() && user == black) Color(0xFFF44336)
+                 else Color(0xFF4CAF50)
+        "0-1" -> if (user.isNotEmpty() && user == white) Color(0xFFF44336)
+                 else Color(0xFF4CAF50)
+        else -> Color(0xFF9E9E9E)
+    }
+}
+
 @Composable
-private fun GameRow(game: ReviewGame, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun GameRow(game: ReviewGame, username: String, onClick: () -> Unit, onDelete: () -> Unit) {
+    val stripColor = outcomeColor(game, username)
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${game.whitePlayer} vs ${game.blackPlayer}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    text = buildString {
-                        if (game.date.isNotEmpty()) append("${game.date}  ")
-                        append(game.result)
-                        if (game.openingName.isNotEmpty()) append("  ·  ${game.openingName}")
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (game.sourceType.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
+        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(stripColor),
+            )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = game.sourceType.replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ChessGold.copy(alpha = 0.7f),
+                        text = "${game.whitePlayer} vs ${game.blackPlayer}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
                     )
+                    Text(
+                        text = buildString {
+                            if (game.date.isNotEmpty()) append("${game.date}  ")
+                            append(game.result)
+                            if (game.openingName.isNotEmpty()) append("  ·  ${game.openingName}")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (game.sourceType.isNotEmpty()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = game.sourceType.replaceFirstChar { it.uppercase() },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ChessGold.copy(alpha = 0.7f),
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Outlined.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

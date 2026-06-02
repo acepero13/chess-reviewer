@@ -68,7 +68,7 @@ val appModule = module {
 
     // ── ViewModels ────────────────────────────────────────────────────────────
     viewModel { HomeViewModel(get()) }
-    viewModel { GameListViewModel(get()) }
+    viewModel { GameListViewModel(get(), get()) }
     viewModel { ImportViewModel(get(), get(), get(), get(), get()) }
     viewModel { (gameId: Long) ->
         AnalysisViewModel(

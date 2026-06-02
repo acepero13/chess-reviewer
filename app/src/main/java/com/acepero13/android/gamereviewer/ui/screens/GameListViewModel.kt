@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -17,9 +18,14 @@ data class GameFilter(
     val source: String? = null,   // "chesscom" | "lichess" | "file" | null
 )
 
-class GameListViewModel(private val repo: GameRepository) : ViewModel() {
+class GameListViewModel(
+    private val repo: GameRepository,
+    private val settings: SettingsRepository,
+) : ViewModel() {
 
     val filter = MutableStateFlow(GameFilter())
+
+    val username = settings.username.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     val games = combine(repo.observeAll(), filter) { all, f ->
         all.filter { game -> game.matchesFilter(f) }
