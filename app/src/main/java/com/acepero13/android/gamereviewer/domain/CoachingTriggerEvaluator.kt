@@ -42,16 +42,31 @@ object CoachingTriggerEvaluator {
     // In the opening phase, only fire PreMoveChecklist / ForcingMove when the
     // mover dropped ≥ this many centipawns — suppress intentional tension / gambits.
     private const val OPENING_TRIGGER_THRESHOLD_CP   = -75
-    private const val IMPULSE_TIME_THRESHOLD_SECONDS = 5   // moves played faster than this qualify as impulsive
-    private const val IMPULSE_CP_LOSS_THRESHOLD      = 200 // centipawn loss that makes a fast move a coached event
+    private const val IMPULSE_TIME_THRESHOLD_SECONDS      = 10  // moves played faster than this qualify as impulsive
+    private const val IMPULSE_CP_LOSS_THRESHOLD            = 200 // centipawn loss that makes a fast move a coached event
+    private const val CALCULATION_BLUNDER_TIME_THRESHOLD_SECONDS = 30 // moves taking longer than this qualify as slow-think blunders
+    // TacticalOversight fills the gap between ImpulseControl and CalculationBlunder:
+    // a normal-paced move (5–30 s) that still caused a large tactical loss.
+    private const val TACTICAL_OVERSIGHT_MIN_SECONDS = IMPULSE_TIME_THRESHOLD_SECONDS
+    private const val TACTICAL_OVERSIGHT_MAX_SECONDS = CALCULATION_BLUNDER_TIME_THRESHOLD_SECONDS
     private const val CANDIDATE_SEARCH_MIN_CP        = 50  // |eval| lower bound for "rich with plans" zone
     private const val CANDIDATE_SEARCH_MAX_CP        = 300 // above this the position is near-decisive, not a plan choice
     private const val CCT_CHECK_EVAL_SHIFT_CP        = 100 // any shift ≥ 1.0 pawn triggers CCT habit reminder
+    // Tier 4 triggers (positional habits: WorstPiece, RookActivation, CandidateMoves,
+    // CandidateSearch) are only meaningful once both sides have largely completed development.
+    // Half-move 30 ≈ move 15 per side — pieces are expected to be undeveloped before that.
+    private const val TIER4_OPENING_GATE                  = 30
+
     // Rook Activation is a middlegame concept — suppress it entirely during the opening.
-    // Half-move 24 ≈ move 12 per side; requiring 2 developed minors guards against rooks
+    // Aligned with TIER4_OPENING_GATE; requiring 2 developed minors guards against rooks
     // that are still physically blocked by unmoved knights/bishops.
-    private const val ROOK_ACTIVATION_MIN_HALF_MOVE       = 24
+    private const val ROOK_ACTIVATION_MIN_HALF_MOVE       = 30
     private const val ROOK_ACTIVATION_MIN_DEVELOPED_MINORS = 2
+
+    // CandidateSearch: if the engine's best move is clearly head-and-shoulders above
+    // alternatives (moverLoss ≥ this value), there is ONE right answer — the student
+    // should calculate, not browse plans.
+    private const val CANDIDATE_SEARCH_CLARITY_CP         = 150
     // ForcingMove only fires when the mover missed a significant tactical opportunity.
     // Suppress when the played move itself was good (e.g., the user captured the hanging piece).
     // 150 cp prevents ordinary bad exchanges (≈1 pawn) from triggering a "find the tactic" prompt.
@@ -61,7 +76,11 @@ object CoachingTriggerEvaluator {
     // worse position fires ForcingMove even though no clear tactic exists.
     private const val FORCING_MOVE_MIN_PLAYER_ADVANTAGE_CP = 150
     // PreMoveChecklist is a habit trigger — suppress it when the move played was not actually bad.
+    // Also suppress when the loss is catastrophically large: a ≥200cp loss means the player
+    // already committed a terminal tactical error; the hanging piece detected is the blundered
+    // piece itself, so a mild "before you commit" reminder is retroactively wrong.
     private const val PRE_MOVE_CHECKLIST_MIN_CP_LOSS = 100
+    private const val PRE_MOVE_CHECKLIST_MAX_CP_LOSS = 200
     // When the player holds a significant advantage, suppress Development/Positional triggers and
     // promote conversion coaching instead. Configurable — 500 cp = 5.0 pawns.
     private const val CONVERSION_ADVANTAGE_THRESHOLD_CP = 500
@@ -75,6 +94,10 @@ object CoachingTriggerEvaluator {
     private const val HARMONY_FIRE_THRESHOLD      = 6
     private const val HARMONY_LOSS_THRESHOLD      = 3
     private const val HARMONY_MIN_DELTA           = 2
+    // PunishBlunder fires when the opponent's move caused a ≥ 120 cp loss from their perspective.
+    // Mutually exclusive with ForcingMove (ForcingMove is more specific — motif-backed).
+    private const val PUNISH_BLUNDER_MIN_CP_LOSS = 120
+
     // Coordination triggers (PieceHarmony, CoordinatedAttack) must be backed by a real eval edge.
     // If the position is near-equal, a geometry transition is noise, not a coaching signal.
     // Also suppressed when the mover just blundered — opponent coordination gain is a consequence,
@@ -97,6 +120,7 @@ object CoachingTriggerEvaluator {
         timeByMoveIndex: (Int) -> Int? = { null },
         playerIsWhite: Boolean = true,
         gameId: Long = 0L,
+        weakTriggerTypes: Set<String> = emptySet(),
     ): Map<Int, List<CoachingTrigger>> {
         val result = mutableMapOf<Int, MutableList<CoachingTrigger>>()
         val sorted = evaluations.sortedBy { it.moveIndex }
@@ -110,6 +134,11 @@ object CoachingTriggerEvaluator {
         var prevPlayerHarmony      = 0
         var prevOpponentHarmony    = 0
 
+        // Sliding window of the last 10 evalDeltas — powers the Volatility metric
+        val recentEvalDeltas = ArrayDeque<Int>(10)
+        // Sliding window of the last 6 evalCp values — powers the Decisiveness Slope metric
+        val recentEvalCps    = ArrayDeque<Int>(6)
+
         sorted.forEachIndexed { i, eval ->
             val triggers   = mutableListOf<CoachingTrigger>()
             val prevEval   = if (i > 0) sorted[i - 1] else null
@@ -120,11 +149,32 @@ object CoachingTriggerEvaluator {
             val pfx = "[game=$gameId move=${eval.moveIndex} ${if (isWhite) "W" else "B"} evalCp=${eval.evalCp} delta=${eval.evalDelta} moverLoss=$moverLoss motif=${eval.motif}]"
             Log.d(TAG, "$pfx --- evaluating triggers ---")
 
-            // Only load the board once and reuse for multiple triggers
+            // ── Update rolling windows ────────────────────────────────────────────
+            if (recentEvalDeltas.size >= 10) recentEvalDeltas.removeFirst()
+            recentEvalDeltas.addLast(eval.evalDelta)
+            if (recentEvalCps.size >= 6) recentEvalCps.removeFirst()
+            recentEvalCps.addLast(eval.evalCp)
+
+            // Load the board once and reuse for multiple triggers + pressure metric
             val board: Board? = runCatching {
                 val fen = fenByMoveIndex(eval.moveIndex)
                 if (fen.isBlank()) null else Board().apply { loadFromFen(fen) }
             }.getOrNull()
+
+            // ── Build GameNarrativeContext for this position ───────────────────────
+            val pressure = if (board != null) computePressureScore(board) else 0f
+            val context  = buildNarrativeContext(
+                evalCp           = eval.evalCp,
+                moverLoss        = moverLoss,
+                motif            = eval.motif,
+                recentDeltas     = recentEvalDeltas,
+                recentCps        = recentEvalCps,
+                pressure         = pressure,
+                playerIsWhite    = playerIsWhite,
+                isWhiteMove      = isWhite,
+                weakTriggerTypes = weakTriggerTypes,
+            )
+            Log.d(TAG, "$pfx Narrative: volatility=${context.volatility} pressure=${context.pressure} slope=${context.playerEvalSlope} complexityGap=${context.complexityGap} volatile=${context.isVolatile} highPressure=${context.isHighPressure} cruising=${context.isCruising} stumbling=${context.isStumbling}")
 
             // ── 1. Safety ─────────────────────────────────────────────────────
             if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
@@ -140,20 +190,38 @@ object CoachingTriggerEvaluator {
             }
 
             // ── 2. Candidate Moves ────────────────────────────────────────────
-            if (eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
+            // Also suppressed when cruising (player is executing a plan) or when there is a
+            // clearly forced best move (player should calculate, not browse plans).
+            if (eval.moveIndex in TIER4_OPENING_GATE..MIDDLEGAME_END
+                && !context.isSuppressTier4
+                && !context.hasForcedBestMove
+                && !context.isCruising) {
                 val t = detectCandidate(eval, isWhite, pfx)
                 if (t != null) { triggers.add(t); Log.d(TAG, "$pfx CandidateMoves: FIRE evalCp=${t.evalCp}") }
+            } else if (context.isSuppressTier4) {
+                Log.d(TAG, "$pfx CandidateMoves: SKIP board hot (volatile=${context.isVolatile} pressure=${context.isHighPressure})")
+            } else if (context.hasForcedBestMove) {
+                Log.d(TAG, "$pfx CandidateMoves: SKIP forced best move (complexityGap=${context.complexityGap})")
+            } else if (context.isCruising) {
+                Log.d(TAG, "$pfx CandidateMoves: SKIP player cruising (slope=${context.playerEvalSlope})")
             } else {
-                Log.d(TAG, "$pfx CandidateMoves: SKIP moveIndex not in middlegame range")
+                Log.d(TAG, "$pfx CandidateMoves: SKIP opening gate or outside range (moveIndex=${eval.moveIndex})")
             }
 
             // ── 3. Worst Piece ────────────────────────────────────────────────
-            if (board != null && eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
+            if (board != null && eval.moveIndex in TIER4_OPENING_GATE..MIDDLEGAME_END && !context.isSuppressTier4) {
                 val t = detectWorstPiece(board, eval.moveIndex, playerIsWhite, worstPieceStreak, pfx)
                 if (t != null) { triggers.add(t); Log.d(TAG, "$pfx WorstPiece: FIRE sq=${t.pieceSquare} mobility=${t.mobility}") }
-            } else if (eval.moveIndex !in MIDDLEGAME_START..MIDDLEGAME_END) {
-                worstPieceStreak.clear()
-                Log.d(TAG, "$pfx WorstPiece: SKIP moveIndex not in middlegame range")
+            } else {
+                if (eval.moveIndex < TIER4_OPENING_GATE) {
+                    worstPieceStreak.clear()
+                    Log.d(TAG, "$pfx WorstPiece: SKIP opening gate (moveIndex=${eval.moveIndex} < $TIER4_OPENING_GATE)")
+                } else if (context.isSuppressTier4) {
+                    Log.d(TAG, "$pfx WorstPiece: SKIP board hot (volatile=${context.isVolatile} pressure=${context.isHighPressure})")
+                } else {
+                    worstPieceStreak.clear()
+                    Log.d(TAG, "$pfx WorstPiece: SKIP outside middlegame range")
+                }
             }
 
             // ── 4. Forcing Move ───────────────────────────────────────────────
@@ -192,9 +260,14 @@ object CoachingTriggerEvaluator {
             }
 
             // ── 7. Rook Activation ────────────────────────────────────────────
-            if (board != null && eval.moveIndex in ROOK_ACTIVATION_MIN_HALF_MOVE..MIDDLEGAME_END) {
+            // Also suppressed when board pressure is high — closed files under tension are
+            // not a strategic choice but a product of the position's complexity.
+            if (board != null && eval.moveIndex in ROOK_ACTIVATION_MIN_HALF_MOVE..MIDDLEGAME_END
+                && !context.isHighPressure) {
                 val t = detectRookActivation(board, eval.moveIndex, playerIsWhite, pfx)
                 if (t != null) { triggers.add(t); Log.d(TAG, "$pfx RookActivation: FIRE rookSq=${t.rookSquare} betterFile=${t.openFileIndex}") }
+            } else if (context.isHighPressure) {
+                Log.d(TAG, "$pfx RookActivation: SKIP high board pressure (pressure=${context.pressure})")
             } else {
                 Log.d(TAG, "$pfx RookActivation: SKIP moveIndex=${eval.moveIndex} not in [$ROOK_ACTIVATION_MIN_HALF_MOVE..$MIDDLEGAME_END] or board=null")
             }
@@ -209,13 +282,59 @@ object CoachingTriggerEvaluator {
                 Log.d(TAG, "$pfx ImpulseControl: SKIP opponent's move")
             }
 
+            // ── 8b. Calculation Blunder ───────────────────────────────────────
+            // Slow move (> 30 s) that still caused a significant evaluation drop —
+            // signals a visualization or calculation failure, not a time-pressure issue.
+            // Only fires on the player's own moves; mutually exclusive with ImpulseControl.
+            if (isWhite == playerIsWhite) {
+                val t = detectCalculationBlunder(eval, isWhite, timeByMoveIndex, pfx)
+                if (t != null) { triggers.add(t); Log.d(TAG, "$pfx CalculationBlunder: FIRE time=${t.timeSpentSeconds}s cpLoss=${t.cpLoss}") }
+            } else {
+                Log.d(TAG, "$pfx CalculationBlunder: SKIP opponent's move")
+            }
+
+            // ── 8c. Tactical Oversight ────────────────────────────────────────
+            // Normal-paced move (5–30 s) that still caused a large evaluation drop —
+            // fills the gap between ImpulseControl and CalculationBlunder.
+            // Only fires on the player's own moves.
+            if (isWhite == playerIsWhite) {
+                val t = detectTacticalOversight(eval, isWhite, timeByMoveIndex, pfx)
+                if (t != null) { triggers.add(t); Log.d(TAG, "$pfx TacticalOversight: FIRE time=${t.timeSpentSeconds}s cpLoss=${t.cpLoss}") }
+            } else {
+                Log.d(TAG, "$pfx TacticalOversight: SKIP opponent's move")
+            }
+
+            // ── 8d. Punish Blunder ────────────────────────────────────────
+            // Fires when the opponent's move was a clear blunder (≥ 150 cp loss from their perspective).
+            // Mutually exclusive with ForcingMove — suppressed in post-processing when ForcingMove fires.
+            if (isWhite != playerIsWhite && eval.moveIndex >= MIDDLEGAME_START) {
+                val t = detectPunishBlunder(eval, moverLoss, pfx)
+                if (t != null) { triggers.add(t); Log.d(TAG, "$pfx PunishBlunder: FIRE opponentLoss=${t.opponentLoss}") }
+            } else if (isWhite == playerIsWhite) {
+                Log.d(TAG, "$pfx PunishBlunder: SKIP player's own move")
+            }
+
             // ── 9. Candidate Search ───────────────────────────────────────────
             // Moderately complex position with no forcing sequence — multiple plans exist.
-            if (eval.moveIndex in MIDDLEGAME_START..MIDDLEGAME_END) {
-                val t = detectCandidateSearch(eval, isWhite, playerIsWhite, pfx)
-                if (t != null) { triggers.add(t); Log.d(TAG, "$pfx CandidateSearch: FIRE evalCp=${t.evalCp}") }
+            // Promoted when the player is stumbling (losing a won game — needs to find a plan).
+            // Suppressed when cruising or when one move is clearly forced.
+            if (eval.moveIndex in TIER4_OPENING_GATE..MIDDLEGAME_END
+                && !context.isSuppressTier4
+                && !context.hasForcedBestMove
+                && !context.isCruising) {
+                val t = detectCandidateSearch(eval, isWhite, playerIsWhite, moverLoss, pfx)
+                if (t != null) {
+                    triggers.add(t)
+                    Log.d(TAG, "$pfx CandidateSearch: FIRE evalCp=${t.evalCp} stumbling=${context.isStumbling}")
+                }
+            } else if (context.isSuppressTier4) {
+                Log.d(TAG, "$pfx CandidateSearch: SKIP board hot (volatile=${context.isVolatile} pressure=${context.isHighPressure})")
+            } else if (context.hasForcedBestMove) {
+                Log.d(TAG, "$pfx CandidateSearch: SKIP forced best move (complexityGap=${context.complexityGap})")
+            } else if (context.isCruising) {
+                Log.d(TAG, "$pfx CandidateSearch: SKIP player cruising (slope=${context.playerEvalSlope})")
             } else {
-                Log.d(TAG, "$pfx CandidateSearch: SKIP moveIndex not in middlegame range")
+                Log.d(TAG, "$pfx CandidateSearch: SKIP opening gate or outside range (moveIndex=${eval.moveIndex})")
             }
 
             // ── 10. CCT Check ─────────────────────────────────────────────────
@@ -355,12 +474,39 @@ object CoachingTriggerEvaluator {
                 Log.d(TAG, "$pfx Coordination: SKIP opening phase or board=null")
             }
 
-            // ── Post-processing: tactical blunder suppression ─────────────────────
-            // When the mover just blundered (≥ COORDINATION_BLUNDER_SUPPRESS_CP), all
-            // tier-3/4 positional triggers are noise. Tier-1 tactical triggers
-            // (ForcingMove, PreMoveChecklist, Safety, ImpulseControl) and tier-2
-            // (CctCheck) are the appropriate coaching voice at such positions.
-            if (moverLoss >= COORDINATION_BLUNDER_SUPPRESS_CP) {
+            // ── Post-processing: King Safety Override ────────────────────────────
+            // If the king is exposed (Safety fired), the player is in fight-or-flight mode.
+            // Any Tier 3/4 coaching at this moment is noise — explicitly suppress it here
+            // before the tier filter so the intent is unambiguous in the logs.
+            if (triggers.any { it is CoachingTrigger.Safety }) {
+                val suppressedBySafety = triggers.filter { it.tier() >= 3 }
+                if (suppressedBySafety.isNotEmpty()) {
+                    Log.d(TAG, "$pfx KingSafetyOverride: suppressing ${suppressedBySafety.map { it.typeName() }} (king exposed)")
+                    triggers.removeAll { it.tier() >= 3 }
+                }
+            }
+
+            // ── Post-processing: In-Check Override ───────────────────────────────
+            // When the side-to-move is in check the player has no strategic freedom —
+            // only moves that escape check are legal. Suppress tier-3/4 positional
+            // coaching (rook activation, worst piece, coordination, plan selection)
+            // unconditionally, even when the Safety trigger itself did not fire
+            // (e.g. the eval drop was below the Safety threshold).
+            if (board != null && board.isKingAttacked()) {
+                val suppressedByCheck = triggers.filter { it.tier() >= 3 }
+                if (suppressedByCheck.isNotEmpty()) {
+                    Log.d(TAG, "$pfx InCheckOverride: suppressing ${suppressedByCheck.map { it.typeName() }} (side-to-move is in check)")
+                    triggers.removeAll { it in suppressedByCheck }
+                }
+            }
+
+            // ── Post-processing: high eval-swing suppression ──────────────────────
+            // When the absolute eval change is large (|evalDelta| ≥ threshold), all
+            // tier-3/4 positional triggers are noise — this applies symmetrically to
+            // blunders AND brilliant moves. Tier-1 tactical triggers and tier-2 (CctCheck)
+            // are the appropriate coaching voice at such positions.
+            val evalSwing = kotlin.math.abs(eval.evalDelta)
+            if (evalSwing >= COORDINATION_BLUNDER_SUPPRESS_CP) {
                 val suppressed = triggers.filter {
                     it is CoachingTrigger.PieceHarmony       ||
                     it is CoachingTrigger.CoordinatedAttack  ||
@@ -371,7 +517,7 @@ object CoachingTriggerEvaluator {
                     it is CoachingTrigger.OpponentPlan
                 }
                 if (suppressed.isNotEmpty()) {
-                    Log.d(TAG, "$pfx BlunderSuppression: removing ${suppressed.map { it.typeName() }} (moverLoss=$moverLoss >= $COORDINATION_BLUNDER_SUPPRESS_CP)")
+                    Log.d(TAG, "$pfx EvalSwingSuppression: removing ${suppressed.map { it.typeName() }} (|evalDelta|=$evalSwing >= $COORDINATION_BLUNDER_SUPPRESS_CP)")
                 }
                 triggers.removeAll { it in suppressed }
             }
@@ -407,12 +553,44 @@ object CoachingTriggerEvaluator {
                 Log.d(TAG, "$pfx ConversionStrategy: SKIP evalFromPlayer=$evalFromPlayer playerTurn=${isWhite == playerIsWhite}")
             }
 
+            // ── CctCheck / OpponentPlan mutual exclusion ──────────────────────────
+            // Both describe "opponent played well" but CctCheck is the more specific,
+            // habit-reinforcing trigger — suppress OpponentPlan when CctCheck fires.
+            if (triggers.any { it is CoachingTrigger.CctCheck }) {
+                val removed = triggers.filter { it is CoachingTrigger.OpponentPlan }
+                if (removed.isNotEmpty()) {
+                    Log.d(TAG, "$pfx CctOpponentMutex: removing OpponentPlan (CctCheck already fired)")
+                }
+                triggers.removeAll { it is CoachingTrigger.OpponentPlan }
+            }
+
+            // ── ForcingMove / PunishBlunder mutual exclusion ──────────────────────
+            // ForcingMove is motif-backed and more specific; suppress PunishBlunder when it fires.
+            if (triggers.any { it is CoachingTrigger.ForcingMove }) {
+                val removed = triggers.filter { it is CoachingTrigger.PunishBlunder }
+                if (removed.isNotEmpty()) {
+                    Log.d(TAG, "$pfx ForcingPunishMutex: removing PunishBlunder (ForcingMove already fired)")
+                }
+                triggers.removeAll { it is CoachingTrigger.PunishBlunder }
+            }
+
+            // ── PunishBlunder / PreMoveChecklist mutual exclusion ─────────────────
+            // PunishBlunder is more specific — the opponent left a piece hanging as part of
+            // their blunder. Suppress the generic pre-move habit reminder so the targeted
+            // "capitalize on their mistake" message is shown instead.
+            if (triggers.any { it is CoachingTrigger.PunishBlunder }) {
+                val removed = triggers.filter { it is CoachingTrigger.PreMoveChecklist }
+                if (removed.isNotEmpty()) {
+                    Log.d(TAG, "$pfx PunishPreMoveMutex: removing PreMoveChecklist (PunishBlunder already fired)")
+                }
+                triggers.removeAll { it is CoachingTrigger.PreMoveChecklist }
+            }
+
             val preFilterTypes = triggers.map { it.typeName() }
             if (triggers.isNotEmpty()) {
                 // Tier-based prioritization: keep only the highest-priority tier that fired.
                 // ConversionStrategy (tier 0) is immune — already injected above after clearing
                 // lower-priority triggers, so it is never filtered here.
-                // Within a tier, all triggers are kept (e.g., Safety + ForcingMove can co-exist).
                 val nonConversion = triggers.filter { it !is CoachingTrigger.ConversionStrategy }
                 if (nonConversion.isNotEmpty()) {
                     val highestTier: Int = nonConversion.minOf { it.tier() }
@@ -422,6 +600,21 @@ object CoachingTriggerEvaluator {
                     }
                     triggers.removeAll { it !is CoachingTrigger.ConversionStrategy && it.tier() != highestTier }
                 }
+
+                // Single-voice enforcer: after tier filtering, keep exactly ONE trigger.
+                // Uses effectiveSubPriority — triggers matching the player's historical
+                // weak areas are promoted (lower effective priority = shown first).
+                val singleBest = triggers.filter { it !is CoachingTrigger.ConversionStrategy }
+                    .minByOrNull { effectiveSubPriority(it, weakTriggerTypes) }
+                if (singleBest != null) {
+                    val voiceRemoved = triggers.filter { it !is CoachingTrigger.ConversionStrategy && it != singleBest }
+                    if (voiceRemoved.isNotEmpty()) {
+                        val promotedNote = if (singleBest.typeName() in weakTriggerTypes) " [WEAK-AREA-BOOST]" else ""
+                        Log.d(TAG, "$pfx SingleVoice: removing ${voiceRemoved.map { it.typeName() }} keeping=${singleBest.typeName()}$promotedNote")
+                    }
+                    triggers.removeAll { it !is CoachingTrigger.ConversionStrategy && it != singleBest }
+                }
+
                 if (triggers.isNotEmpty()) {
                     result[eval.moveIndex] = triggers
                 }
@@ -525,7 +718,8 @@ object CoachingTriggerEvaluator {
         streakTracker: MutableMap<String, Int>,
         pfx: String = "",
     ): CoachingTrigger.WorstPiece? {
-        val side = if (isWhite) Side.WHITE else Side.BLACK
+        val side         = if (isWhite) Side.WHITE else Side.BLACK
+        val opponentSide = if (isWhite) Side.BLACK else Side.WHITE
 
         val candidatePieceTypes = setOf(
             PieceType.KNIGHT, PieceType.BISHOP, PieceType.ROOK, PieceType.QUEEN,
@@ -542,8 +736,17 @@ object CoachingTriggerEvaluator {
         }
 
         val (worstSq, mobility) = restricted.minByOrNull { (_, mob) -> mob } ?: return null
-        val key = worstSq.name
 
+        // If the restricted piece is under attack it is a tactical emergency, not a strategic
+        // positional issue. Suppress here so PreMoveChecklist can handle it instead.
+        val isUnderAttack = BoardAttackHelper.attackersOf(board, worstSq, opponentSide).isNotEmpty()
+        if (isUnderAttack) {
+            Log.d(TAG, "$pfx WorstPiece: SUPPRESS sq=$worstSq is under attack — deferring to PreMoveChecklist")
+            streakTracker.clear()
+            return null
+        }
+
+        val key = worstSq.name
         val prevStreak = streakTracker[key] ?: 0
         streakTracker.clear()
         val newStreak = prevStreak + 1
@@ -612,6 +815,10 @@ object CoachingTriggerEvaluator {
     ): CoachingTrigger.PreMoveChecklist? {
         if (moverLoss < PRE_MOVE_CHECKLIST_MIN_CP_LOSS) {
             Log.d(TAG, "$pfx PreMoveChecklist: SUPPRESS moverLoss=$moverLoss < threshold=$PRE_MOVE_CHECKLIST_MIN_CP_LOSS")
+            return null
+        }
+        if (moverLoss >= PRE_MOVE_CHECKLIST_MAX_CP_LOSS) {
+            Log.d(TAG, "$pfx PreMoveChecklist: SUPPRESS terminal blunder moverLoss=$moverLoss >= max=$PRE_MOVE_CHECKLIST_MAX_CP_LOSS — hanging piece is the blunder itself, not a pre-move oversight")
             return null
         }
 
@@ -737,15 +944,71 @@ object CoachingTriggerEvaluator {
         }
     }
 
+    private fun detectCalculationBlunder(
+        eval: GameEvaluation,
+        isWhite: Boolean,
+        timeByMoveIndex: (Int) -> Int?,
+        pfx: String = "",
+    ): CoachingTrigger.CalculationBlunder? {
+        val timeSpent = timeByMoveIndex(eval.moveIndex) ?: run {
+            Log.d(TAG, "$pfx CalculationBlunder: SUPPRESS no clock data for move=${eval.moveIndex}")
+            return null
+        }
+        if (timeSpent < CALCULATION_BLUNDER_TIME_THRESHOLD_SECONDS) {
+            Log.d(TAG, "$pfx CalculationBlunder: SUPPRESS timeSpent=${timeSpent}s < threshold=${CALCULATION_BLUNDER_TIME_THRESHOLD_SECONDS}s")
+            return null
+        }
+        val moverEvalDelta = if (isWhite) eval.evalDelta else -eval.evalDelta
+        return if (moverEvalDelta <= -IMPULSE_CP_LOSS_THRESHOLD) {
+            CoachingTrigger.CalculationBlunder(eval.moveIndex, timeSpent, kotlin.math.abs(moverEvalDelta))
+        } else {
+            Log.d(TAG, "$pfx CalculationBlunder: SUPPRESS slow move (${timeSpent}s) but moverEvalDelta=$moverEvalDelta not <= -$IMPULSE_CP_LOSS_THRESHOLD")
+            null
+        }
+    }
+
+    private fun detectTacticalOversight(
+        eval: GameEvaluation,
+        isWhite: Boolean,
+        timeByMoveIndex: (Int) -> Int?,
+        pfx: String = "",
+    ): CoachingTrigger.TacticalOversight? {
+        val timeSpent = timeByMoveIndex(eval.moveIndex) ?: run {
+            Log.d(TAG, "$pfx TacticalOversight: SUPPRESS no clock data for move=${eval.moveIndex}")
+            return null
+        }
+        if (timeSpent < TACTICAL_OVERSIGHT_MIN_SECONDS || timeSpent >= TACTICAL_OVERSIGHT_MAX_SECONDS) {
+            Log.d(TAG, "$pfx TacticalOversight: SUPPRESS timeSpent=${timeSpent}s not in [${TACTICAL_OVERSIGHT_MIN_SECONDS}..${TACTICAL_OVERSIGHT_MAX_SECONDS})")
+            return null
+        }
+        val moverEvalDelta = if (isWhite) eval.evalDelta else -eval.evalDelta
+        return if (moverEvalDelta <= -IMPULSE_CP_LOSS_THRESHOLD) {
+            CoachingTrigger.TacticalOversight(eval.moveIndex, timeSpent, kotlin.math.abs(moverEvalDelta))
+        } else {
+            Log.d(TAG, "$pfx TacticalOversight: SUPPRESS moverEvalDelta=$moverEvalDelta not <= -$IMPULSE_CP_LOSS_THRESHOLD")
+            null
+        }
+    }
+
     private fun detectCandidateSearch(
         eval: GameEvaluation,
         isWhite: Boolean,
         playerIsWhite: Boolean,
+        moverLoss: Int,
         pfx: String = "",
     ): CoachingTrigger.CandidateSearch? {
         val evalFromMover  = if (isWhite) eval.evalCp else -eval.evalCp
         val absMover       = kotlin.math.abs(evalFromMover)
         val evalFromPlayer = if (playerIsWhite) eval.evalCp else -eval.evalCp
+
+        // Tactical Presence gate: if one move was clearly head-and-shoulders above the rest
+        // (large moverLoss = the played move was obviously wrong), this is a calculation problem,
+        // not a "search for the best plan" moment. Suppress so ForcingMove / PreMoveChecklist can speak.
+        if (moverLoss >= CANDIDATE_SEARCH_CLARITY_CP) {
+            Log.d(TAG, "$pfx CandidateSearch: SUPPRESS moverLoss=$moverLoss >= $CANDIDATE_SEARCH_CLARITY_CP (clear best move exists)")
+            return null
+        }
+
         return if (eval.motif == "mixed" && absMover in CANDIDATE_SEARCH_MIN_CP..CANDIDATE_SEARCH_MAX_CP) {
             CoachingTrigger.CandidateSearch(eval.moveIndex, evalFromPlayer)
         } else {
@@ -775,6 +1038,86 @@ object CoachingTriggerEvaluator {
             null
         }
     }
+
+    private fun detectPunishBlunder(
+        eval: GameEvaluation,
+        moverLoss: Int,
+        pfx: String = "",
+    ): CoachingTrigger.PunishBlunder? {
+        return if (moverLoss >= PUNISH_BLUNDER_MIN_CP_LOSS) {
+            CoachingTrigger.PunishBlunder(eval.moveIndex, moverLoss)
+        } else {
+            Log.d(TAG, "$pfx PunishBlunder: SUPPRESS moverLoss=$moverLoss < threshold=$PUNISH_BLUNDER_MIN_CP_LOSS")
+            null
+        }
+    }
+
+    // ── Game Narrative Context helpers ────────────────────────────────────────
+
+    /**
+     * Constructs a [GameNarrativeContext] for the current position using rolling windows
+     * and the per-position board geometry.
+     */
+    private fun buildNarrativeContext(
+        evalCp: Int,
+        moverLoss: Int,
+        motif: String,
+        recentDeltas: List<Int>,
+        recentCps: List<Int>,
+        pressure: Float,
+        playerIsWhite: Boolean,
+        isWhiteMove: Boolean,
+        weakTriggerTypes: Set<String>,
+    ): GameNarrativeContext {
+        // Volatility: rolling average of |evalDelta| over the window
+        val volatility = if (recentDeltas.isEmpty()) 0f
+                         else recentDeltas.map { kotlin.math.abs(it) }.average().toFloat()
+
+        // Decisiveness slope: rate of eval change from the player's perspective
+        val slopeWhite = if (recentCps.size >= 2)
+            (recentCps.last() - recentCps.first()).toFloat() / (recentCps.size - 1)
+        else 0f
+        val playerEvalSlope = if (playerIsWhite) slopeWhite else -slopeWhite
+
+        // Complexity gap: heuristic from moverLoss + motif
+        val complexityGap = when {
+            motif != "mixed"                    -> maxOf(moverLoss, FORCED_MOVE_GAP_CP)  // tactical motif → forced
+            moverLoss >= CANDIDATE_SEARCH_CLARITY_CP -> moverLoss                        // large blunder → forced
+            else                                -> minOf(moverLoss, STRATEGIC_GAP_MAX_CP) // calm position
+        }
+
+        val playerEvalCp = if (playerIsWhite) evalCp else -evalCp
+
+        return GameNarrativeContext(
+            volatility       = volatility,
+            pressure         = pressure,
+            playerEvalSlope  = playerEvalSlope,
+            complexityGap    = complexityGap,
+            playerEvalCp     = playerEvalCp,
+            weakTriggerTypes = weakTriggerTypes,
+        )
+    }
+
+    /**
+     * Computes the average number of opponent attackers per piece on the board.
+     * High values indicate a congested, high-tension position.
+     */
+    private fun computePressureScore(board: Board): Float {
+        val pieces = BoardAttackHelper.allPieces(board)
+        if (pieces.isEmpty()) return 0f
+        val totalAttackers = pieces.sumOf { (sq, piece) ->
+            val attackerSide = if (piece.pieceSide == Side.WHITE) Side.BLACK else Side.WHITE
+            BoardAttackHelper.attackersOf(board, sq, attackerSide).size
+        }
+        return totalAttackers.toFloat() / pieces.size
+    }
+
+    /**
+     * Sub-priority adjusted for the player's weak areas.
+     * Triggers matching a historically missed pattern are promoted within their tier.
+     */
+    private fun effectiveSubPriority(trigger: CoachingTrigger, weakTypes: Set<String>): Int =
+        if (trigger.typeName() in weakTypes) trigger.subPriority() - 5 else trigger.subPriority()
 
     // ── Board geometry helpers ─────────────────────────────────────────────────
 

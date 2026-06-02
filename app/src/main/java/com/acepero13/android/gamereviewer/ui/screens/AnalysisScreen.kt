@@ -84,6 +84,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.runtime.mutableStateOf
@@ -101,6 +102,7 @@ import com.acepero13.android.gamereviewer.domain.InsightReconciler
 import com.acepero13.android.gamereviewer.ui.components.AnalysePanel
 import com.acepero13.android.gamereviewer.ui.components.CriticalMomentSheet
 import com.acepero13.android.gamereviewer.ui.components.MentorPanel
+import com.acepero13.android.gamereviewer.ui.components.MentorPivotalMomentsPanel
 import com.acepero13.android.gamereviewer.ui.components.NavigateModeContent
 import com.acepero13.android.gamereviewer.ui.components.OpeningDeviationPanel
 import com.acepero13.android.gamereviewer.ui.components.PositionCoachCard
@@ -157,6 +159,15 @@ fun AnalysisScreen(
     vm:                   AnalysisViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state    by vm.uiState.collectAsState()
+
+    // Intercept back button in sub-modes so it returns to Navigate instead of exiting the screen.
+    BackHandler(enabled = state.reviewMode != ReviewMode.NAVIGATE) {
+        when (state.reviewMode) {
+            ReviewMode.ANALYSE -> vm.setReviewMode(ReviewMode.NAVIGATE)
+            ReviewMode.MENTOR  -> vm.exitMentorMode()
+            else               -> {}
+        }
+    }
 
     LaunchedEffect(initialMoveIndex) {
         if (initialMoveIndex != null) {
@@ -409,6 +420,7 @@ fun AnalysisScreen(
                     ProactiveCoachingPanel(
                         trigger                   = trigger,
                         visible                   = state.showProactiveCoaching,
+                        isWeakArea                = trigger.typeName() in state.weakTriggerTypes,
                         onDismiss                 = vm::dismissProactiveCoaching,
                         onStartInteraction        = vm::startProactiveInteraction,
                         proactiveInteractiveMode  = state.proactiveInteractiveMode,
@@ -558,61 +570,75 @@ fun AnalysisScreen(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (state.showReflectionMode) {
-                            // ── Board Scan Reflection Mode ─────────────────────
-                            BoardScanReflectionPanel(
-                                items     = state.reflectionItems,
-                                onAnswer  = vm::answerReflection,
-                                onFinish  = vm::exitReflectionMode,
-                                modifier  = Modifier.fillMaxWidth().weight(1f),
-                            )
-                        } else {
-                            // ── Normal Mentor panel ────────────────────────────
-                            // Coach's Briefing — cross-game weakness context shown at session start
-                            AnimatedVisibility(
-                                visible = state.showCoachsBriefing && state.weaknessContext != null,
-                                enter   = fadeIn(tween(200)) + expandVertically(),
-                                exit    = fadeOut(tween(150)) + shrinkVertically(),
-                            ) {
-                                state.weaknessContext?.let { ctx ->
-                                    CoachsBriefingCard(
-                                        ctx       = ctx,
-                                        onDismiss = vm::dismissCoachsBriefing,
-                                        modifier  = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp),
+                        when {
+                            state.showPivotalMomentsPanel -> {
+                                // ── Big Three overview panel ───────────────────
+                                state.pivotalMoments?.let { moments ->
+                                    MentorPivotalMomentsPanel(
+                                        moments  = moments,
+                                        onReview = vm::reviewPivotalMoment,
+                                        onSkip   = vm::dismissPivotalMomentsPanel,
+                                        modifier = Modifier.fillMaxWidth().weight(1f),
                                     )
                                 }
                             }
-                            HorizontalDivider(color = BottomBarDivider, thickness = 1.dp)
-                            if (state.mentorSessionQueue.isNotEmpty()) {
-                                val weaknessDotPositions: Set<Int> = run {
-                                    val matchingIndices = state.weaknessContext
-                                        ?.matchingMoveIndices?.toSet() ?: emptySet()
-                                    state.mentorSessionQueue
-                                        .mapIndexedNotNull { pos, moveIdx ->
-                                            if (moveIdx in matchingIndices) pos + 1 else null
-                                        }
-                                        .toSet()
-                                }
-                                MentorSessionProgressHeader(
-                                    current              = state.mentorSessionIdx + 1,
-                                    total                = state.mentorSessionQueue.size,
-                                    modifier             = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 6.dp),
-                                    weaknessDotPositions = weaknessDotPositions,
+                            state.showReflectionMode -> {
+                                // ── Board Scan Reflection Mode ─────────────────────
+                                BoardScanReflectionPanel(
+                                    items     = state.reflectionItems,
+                                    onAnswer  = vm::answerReflection,
+                                    onFinish  = vm::exitReflectionMode,
+                                    modifier  = Modifier.fillMaxWidth().weight(1f),
                                 )
                             }
-                            val isRecurring = state.weaknessContext
-                                ?.matchingMoveIndices
-                                ?.contains(state.guidedDiscoveryCriticalMoment?.moveIndex) == true
-                            MentorPanel(
-                                state              = state,
-                                vm                 = vm,
-                                isRecurringPattern = isRecurring,
-                                modifier           = Modifier.fillMaxWidth().weight(1f),
-                            )
+                            else -> {
+                                // ── Normal Mentor panel ────────────────────────────
+                                // Coach's Briefing — cross-game weakness context shown at session start
+                                AnimatedVisibility(
+                                    visible = state.showCoachsBriefing && state.weaknessContext != null,
+                                    enter   = fadeIn(tween(200)) + expandVertically(),
+                                    exit    = fadeOut(tween(150)) + shrinkVertically(),
+                                ) {
+                                    state.weaknessContext?.let { ctx ->
+                                        CoachsBriefingCard(
+                                            ctx       = ctx,
+                                            onDismiss = vm::dismissCoachsBriefing,
+                                            modifier  = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp),
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(color = BottomBarDivider, thickness = 1.dp)
+                                if (state.mentorSessionQueue.isNotEmpty()) {
+                                    val weaknessDotPositions: Set<Int> = run {
+                                        val matchingIndices = state.weaknessContext
+                                            ?.matchingMoveIndices?.toSet() ?: emptySet()
+                                        state.mentorSessionQueue
+                                            .mapIndexedNotNull { pos, moveIdx ->
+                                                if (moveIdx in matchingIndices) pos + 1 else null
+                                            }
+                                            .toSet()
+                                    }
+                                    MentorSessionProgressHeader(
+                                        current              = state.mentorSessionIdx + 1,
+                                        total                = state.mentorSessionQueue.size,
+                                        modifier             = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 6.dp),
+                                        weaknessDotPositions = weaknessDotPositions,
+                                    )
+                                }
+                                val isRecurring = state.weaknessContext
+                                    ?.matchingMoveIndices
+                                    ?.contains(state.guidedDiscoveryCriticalMoment?.moveIndex) == true
+                                MentorPanel(
+                                    state              = state,
+                                    vm                 = vm,
+                                    isRecurringPattern = isRecurring,
+                                    modifier           = Modifier.fillMaxWidth().weight(1f),
+                                )
+                            }
                         }
                     }
                 }
@@ -885,8 +911,6 @@ private fun AnalysisBottomBar(
                 }
 
                 // ── Analyse ────────────────────────────────────────────────────
-                // Navigate button removed — use system back / top-bar arrow instead.
-                // Mentor button removed — accessible via "Review suggestion" banner.
                 ReviewMode.ANALYSE -> {
                     Row(
                         modifier              = Modifier
@@ -896,6 +920,11 @@ private fun AnalysisBottomBar(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment     = Alignment.CenterVertically,
                     ) {
+                        BottomBarButton(
+                            icon    = Icons.Outlined.ArrowBackIosNew,
+                            label   = "Navigate",
+                            onClick = { vm.setReviewMode(ReviewMode.NAVIGATE) },
+                        )
                         BottomBarButton(
                             icon     = Icons.Outlined.Edit,
                             label    = "Edit",

@@ -368,6 +368,17 @@ data class AnalysisUiState(
     val showPostGameDebrief: Boolean = false,
     /** Comparison of the player's prediction vs engine findings. */
     val predictionMatchResult: PredictionMatchResult? = null,
+
+    // ── Recency Bias — player's historically weak trigger types ──────────────
+    /** Trigger types the player has consistently missed across previous games.
+     *  Populated during background analysis from BehavioralDiagnostic. */
+    val weakTriggerTypes: Set<String> = emptySet(),
+
+    // ── Mentor pivotal moments (Big Three) ───────────────────────────────────
+    /** The three key moments for this game's mentor session. Null until computed. */
+    val pivotalMoments: com.acepero13.android.gamereviewer.domain.PivotalMoments? = null,
+    /** True while the Pivotal Moments overview panel is shown before the session begins. */
+    val showPivotalMomentsPanel: Boolean = false,
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -747,11 +758,14 @@ class AnalysisViewModel(
                     is CoachingTrigger.PreMoveChecklist    -> "hangingSquare=${t.hangingSquare}"
                     is CoachingTrigger.RookActivation      -> "rookSquare=${t.rookSquare}, openFileIndex=${t.openFileIndex}"
                     is CoachingTrigger.ImpulseControl      -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
+                    is CoachingTrigger.CalculationBlunder  -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
+                    is CoachingTrigger.TacticalOversight   -> "timeSpentSeconds=${t.timeSpentSeconds}, cpLoss=${t.cpLoss}"
                     is CoachingTrigger.CandidateSearch     -> "evalCp=${t.evalCp}"
                     is CoachingTrigger.CctCheck            -> "evalDelta=${t.evalDelta}"
                     is CoachingTrigger.ConversionStrategy  -> "evaluationCp=${t.evaluationCp}"
                     is CoachingTrigger.CoordinatedAttack   -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, pieceCount=${t.pieceCount}"
                     is CoachingTrigger.PieceHarmony        -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, score=${t.score}"
+                    is CoachingTrigger.PunishBlunder       -> "opponentLoss=${t.opponentLoss}"
                 }
                 appendLine("**Trigger properties:** $props")
             }
@@ -1422,9 +1436,11 @@ class AnalysisViewModel(
                 classificationCorrectIndex    = -1,
                 classificationSelectedIndex   = -1,
                 guidedDiscoveryInsightRevealed = false,
-                // Clear weakness context
+                // Clear weakness context + pivotal moments
                 weaknessContext               = null,
                 showCoachsBriefing            = false,
+                pivotalMoments                = null,
+                showPivotalMomentsPanel       = false,
                 // Clear proactive coaching + reflection state
                 showProactiveCoaching         = false,
                 activeProactiveTrigger        = null,
@@ -1798,9 +1814,11 @@ class AnalysisViewModel(
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Starts a structured Mentor session that reviews the top 2–3 ENGINE_MARKED
-     * mistakes belonging to the USER (filtered by player side).
-     * Mistakes are sorted by severity (centipawn loss) descending.
+     * Starts a structured Mentor session built around the "Big Three" pivotal moments.
+     *
+     * Computes [PivotalMoments] from the hidden truth map, then shows an overview
+     * panel ([showPivotalMomentsPanel]) before the user enters the first position.
+     * The session queue is derived from the three identified moments.
      */
     fun enterMentorSession() {
         viewModelScope.launch {
@@ -1810,15 +1828,27 @@ class AnalysisViewModel(
             if (currentMoments.isEmpty()) return@launch
 
             // Load cross-game data to identify top weakness
-            val allMoments = withContext(Dispatchers.IO) { criticalMomentDao.getAll() }
+            val allMoments         = withContext(Dispatchers.IO) { criticalMomentDao.getAll() }
             val totalGamesAnalyzed = withContext(Dispatchers.IO) { criticalMomentDao.countGamesAnalyzed() }
 
-            val topTrend = withContext(Dispatchers.Default) {
+            val topTrend      = withContext(Dispatchers.Default) {
                 BehavioralDiagnostic.diagnose(allMoments, topN = 1).firstOrNull()
             }
             val topCategories = topTrend?.triggerCategories ?: emptySet()
 
-            val queue = buildWeaknessPrioritizedQueue(currentMoments, topCategories)
+            // Identify the Big Three pivotal moments
+            val pivotalMoments = withContext(Dispatchers.Default) {
+                com.acepero13.android.gamereviewer.domain.PivotalMomentsSelector.select(
+                    truthMap        = truthMap,
+                    criticalMoments = currentMoments,
+                    isUserMove      = ::isUserMove,
+                )
+            }
+
+            // Session queue: pivotal moment indices when available, fallback to severity-sorted list
+            val queue = pivotalMoments.moveIndices.ifEmpty {
+                buildWeaknessPrioritizedQueue(currentMoments, topCategories)
+            }
             if (queue.isEmpty()) return@launch
 
             val matchingIndices = currentMoments
@@ -1827,25 +1857,79 @@ class AnalysisViewModel(
 
             val weaknessCtx = topTrend?.let { trend ->
                 WeaknessContext(
-                    trendTitle         = trend.title,
-                    trendEmoji         = trend.emoji,
-                    trendDescription   = trend.description,
-                    gamesAffected      = trend.frequency,
-                    totalGamesAnalyzed = totalGamesAnalyzed,
+                    trendTitle          = trend.title,
+                    trendEmoji          = trend.emoji,
+                    trendDescription    = trend.description,
+                    gamesAffected       = trend.frequency,
+                    totalGamesAnalyzed  = totalGamesAnalyzed,
                     matchingMoveIndices = matchingIndices,
                 )
             }
 
             _uiState.update {
                 it.copy(
-                    mentorSessionQueue  = queue,
-                    mentorSessionIdx    = 0,
-                    weaknessContext     = weaknessCtx,
-                    showCoachsBriefing  = weaknessCtx != null,
+                    mentorSessionQueue      = queue,
+                    mentorSessionIdx        = 0,
+                    weaknessContext         = weaknessCtx,
+                    showCoachsBriefing      = false,    // briefing shown inside pivotal panel instead
+                    pivotalMoments          = pivotalMoments,
+                    showPivotalMomentsPanel = true,
+                    reviewMode              = ReviewMode.MENTOR,
+                    previousReviewMode      = it.reviewMode,
                 )
             }
-            enterMentorMode(targetMoveIndex = queue[0])
+            // Navigation is frozen — the user selects which moment to review from the panel.
         }
+    }
+
+    /**
+     * Dismisses the Pivotal Moments overview panel and begins the session in order,
+     * navigating to the first moment in the queue.
+     */
+    fun dismissPivotalMomentsPanel() {
+        _uiState.update { it.copy(showPivotalMomentsPanel = false) }
+        val queue = _uiState.value.mentorSessionQueue
+        if (queue.isNotEmpty()) {
+            enterMentorMode(targetMoveIndex = queue[0])
+        } else {
+            exitMentorMode()
+        }
+    }
+
+    /**
+     * Jumps directly to a specific pivotal moment chosen by the user from the overview panel.
+     * Updates the session index so [advanceMentorSession] continues from the right position.
+     */
+    fun reviewPivotalMoment(moveIndex: Int) {
+        _uiState.update { it.copy(showPivotalMomentsPanel = false) }
+        val queue = _uiState.value.mentorSessionQueue
+        val idx   = queue.indexOf(moveIndex)
+        if (idx >= 0) _uiState.update { it.copy(mentorSessionIdx = idx) }
+        enterMentorMode(targetMoveIndex = moveIndex)
+    }
+
+    /**
+     * Maps the player's top failure archetypes (from [BehavioralDiagnostic]) to the
+     * coaching trigger type names they correspond to, so those triggers are promoted
+     * by [CoachingTriggerEvaluator] when they fire in the current game.
+     */
+    private fun buildWeakTriggerTypes(allMoments: List<CriticalMoment>): Set<String> {
+        if (allMoments.isEmpty()) return emptySet()
+        val trends = BehavioralDiagnostic.diagnose(allMoments, topN = 2)
+        return trends.flatMap { trend ->
+            trend.triggerCategories.flatMap { category ->
+                when (category) {
+                    CriticalMoment.ReasonCategory.MISSED_TACTIC,
+                    CriticalMoment.ReasonCategory.HANGING_PIECE    -> listOf("PRE_MOVE_CHECKLIST", "FORCING_MOVE")
+                    CriticalMoment.ReasonCategory.KING_SAFETY       -> listOf("SAFETY")
+                    CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE -> listOf("CANDIDATE_MOVES", "CANDIDATE_SEARCH")
+                    CriticalMoment.ReasonCategory.MISSED_WIN        -> listOf("FORCING_MOVE", "CCT_CHECK")
+                    CriticalMoment.ReasonCategory.TIME_PRESSURE     -> listOf("IMPULSE_CONTROL", "CALCULATION_BLUNDER")
+                    CriticalMoment.ReasonCategory.OPENING_DEVIATION -> listOf("CANDIDATE_MOVES")
+                    CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> listOf("WORST_PIECE", "ROOK_ACTIVATION")
+                }
+            }
+        }.toSet()
     }
 
     private fun buildWeaknessPrioritizedQueue(
@@ -2508,15 +2592,18 @@ class AnalysisViewModel(
                 // detection logic (including exchange-aware hanging-piece checks) is always
                 // applied — stored coachingTriggers strings from earlier app versions may
                 // contain false positives that the current evaluator would correctly suppress.
-                val mastered = masteryRepo.getMasteredTypes()
-                val moveTimes = moveTimeDao.getByGameId(gameId).associateBy { it.moveIndex }
+                val mastered    = masteryRepo.getMasteredTypes()
+                val moveTimes   = moveTimeDao.getByGameId(gameId).associateBy { it.moveIndex }
+                val allMoments  = criticalMomentDao.getAll()
+                val weakTypes   = buildWeakTriggerTypes(allMoments)
                 val allTriggers = withContext(Dispatchers.Default) {
                     CoachingTriggerEvaluator.evaluate(
-                        evaluations    = dbEvals,
-                        fenByMoveIndex = { idx -> fenSequence.getOrElse(idx) { "" } },
-                        timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
-                        playerIsWhite  = !boardFlippedForBlack,
-                        gameId         = gameId,
+                        evaluations      = dbEvals,
+                        fenByMoveIndex   = { idx -> fenSequence.getOrElse(idx) { "" } },
+                        timeByMoveIndex  = { idx -> moveTimes[idx]?.timeSpentSeconds },
+                        playerIsWhite    = !boardFlippedForBlack,
+                        gameId           = gameId,
+                        weakTriggerTypes = weakTypes,
                     )
                 }
                 Log.d(tag, "CoachTrigger (DB restore re-eval): ${allTriggers.values.sumOf { it.size }} triggers across ${allTriggers.size} positions  mastered=$mastered")
@@ -2541,6 +2628,7 @@ class AnalysisViewModel(
                         backgroundAnalysisProgress = 1f,
                         gameHighlights             = highlights,
                         triggersByMove             = restoredTriggers,
+                        weakTriggerTypes           = weakTypes,
                         gameStory                  = story,
                         showPostGameDebrief        = st.showPostGameDebrief || atEnd,
                         predictionMatchResult      = matchResult,
@@ -2580,13 +2668,18 @@ class AnalysisViewModel(
                 moveTimeDao.getByGameId(gameId).associateBy { it.moveIndex }
             }
 
+            // Load cross-game weak areas for recency-bias coaching promotion
+            val allMoments = withContext(Dispatchers.IO) { criticalMomentDao.getAll() }
+            val weakTypes  = buildWeakTriggerTypes(allMoments)
+
             // Detect proactive coaching triggers from the fresh truth map
             val allTriggers = CoachingTriggerEvaluator.evaluate(
-                evaluations     = evaluations,
-                fenByMoveIndex  = { idx -> fenSequence.getOrElse(idx) { "" } },
-                timeByMoveIndex = { idx -> moveTimes[idx]?.timeSpentSeconds },
-                playerIsWhite   = !boardFlippedForBlack,
-                gameId          = gameId,
+                evaluations      = evaluations,
+                fenByMoveIndex   = { idx -> fenSequence.getOrElse(idx) { "" } },
+                timeByMoveIndex  = { idx -> moveTimes[idx]?.timeSpentSeconds },
+                playerIsWhite    = !boardFlippedForBlack,
+                gameId           = gameId,
+                weakTriggerTypes = weakTypes,
             )
             Log.d(tag, "CoachTrigger: ${allTriggers.values.sumOf { it.size }} raw triggers across ${allTriggers.size} positions — by type: ${allTriggers.values.flatten().groupBy { it.typeName() }.mapValues { it.value.size }}")
             Log.d(tag, "CoachTrigger: fenSequence.size=${fenSequence.size}  evaluations.size=${evaluations.size}  sampleEvalDeltas=${evaluations.take(5).map { it.evalDelta }}  sampleMotifs=${evaluations.take(5).map { it.motif }}")
@@ -2599,7 +2692,7 @@ class AnalysisViewModel(
             }.filter { (_, triggers) -> triggers.isNotEmpty() }
             Log.d(tag, "CoachTrigger: after mastery filter — ${triggerMap.size} positions remain, keys=${triggerMap.keys.take(10)}")
 
-            _uiState.update { it.copy(triggersByMove = triggerMap) }
+            _uiState.update { it.copy(triggersByMove = triggerMap, weakTriggerTypes = weakTypes) }
             // Persist the full (unfiltered) trigger data for future sessions
             if (allTriggers.isNotEmpty()) {
                 launch(Dispatchers.IO) {

@@ -38,6 +38,12 @@ sealed class CoachingTrigger(val moveIndex: Int) {
     /** Move played in < 5 seconds AND evaluation dropped > 200 cp — impulsive, unverified move. */
     class ImpulseControl(moveIndex: Int, val timeSpentSeconds: Int, val cpLoss: Int) : CoachingTrigger(moveIndex)
 
+    /** Move played after > 30 seconds of thinking AND evaluation dropped > 200 cp — visualization or calculation breakdown. */
+    class CalculationBlunder(moveIndex: Int, val timeSpentSeconds: Int, val cpLoss: Int) : CoachingTrigger(moveIndex)
+
+    /** Move played in 5–30 seconds AND evaluation dropped > 200 cp — had time to spot the tactic but missed it. */
+    class TacticalOversight(moveIndex: Int, val timeSpentSeconds: Int, val cpLoss: Int) : CoachingTrigger(moveIndex)
+
     /** Position is complex with multiple plans of different tactical character — compare, don't guess. */
     class CandidateSearch(moveIndex: Int, val evalCp: Int) : CoachingTrigger(moveIndex)
 
@@ -67,36 +73,44 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         val targetSquares: List<Square> = emptyList(),
     ) : CoachingTrigger(moveIndex)
 
+    /** Opponent blundered ≥ 150 cp — opportunity to capitalize on their mistake. */
+    class PunishBlunder(moveIndex: Int, val opponentLoss: Int) : CoachingTrigger(moveIndex)
+
     // ── Identity ───────────────────────────────────────────────────────────────
 
     fun typeName(): String = when (this) {
-        is Safety              -> "SAFETY"
-        is CandidateMoves      -> "CANDIDATE_MOVES"
-        is WorstPiece          -> "WORST_PIECE"
-        is ForcingMove         -> "FORCING_MOVE"
-        is OpponentPlan        -> "OPPONENT_PLAN"
-        is PreMoveChecklist    -> "PRE_MOVE_CHECKLIST"
-        is RookActivation      -> "ROOK_ACTIVATION"
-        is ImpulseControl      -> "IMPULSE_CONTROL"
-        is CandidateSearch     -> "CANDIDATE_SEARCH"
-        is CctCheck            -> "CCT_CHECK"
-        is ConversionStrategy  -> "CONVERSION_STRATEGY"
-        is CoordinatedAttack   -> "COORDINATED_ATTACK"
-        is PieceHarmony        -> "PIECE_HARMONY"
+        is Safety               -> "SAFETY"
+        is CandidateMoves       -> "CANDIDATE_MOVES"
+        is WorstPiece           -> "WORST_PIECE"
+        is ForcingMove          -> "FORCING_MOVE"
+        is OpponentPlan         -> "OPPONENT_PLAN"
+        is PreMoveChecklist     -> "PRE_MOVE_CHECKLIST"
+        is RookActivation       -> "ROOK_ACTIVATION"
+        is ImpulseControl       -> "IMPULSE_CONTROL"
+        is CalculationBlunder   -> "CALCULATION_BLUNDER"
+        is TacticalOversight    -> "TACTICAL_OVERSIGHT"
+        is CandidateSearch      -> "CANDIDATE_SEARCH"
+        is CctCheck             -> "CCT_CHECK"
+        is ConversionStrategy   -> "CONVERSION_STRATEGY"
+        is CoordinatedAttack    -> "COORDINATED_ATTACK"
+        is PieceHarmony         -> "PIECE_HARMONY"
+        is PunishBlunder        -> "PUNISH_BLUNDER"
     }
 
     fun emoji(): String = when (this) {
-        is Safety              -> "♔"
-        is CandidateMoves      -> "⚖️"
-        is WorstPiece          -> "♟"
-        is ForcingMove         -> "⚔️"
-        is OpponentPlan        -> "🔭"
-        is PreMoveChecklist    -> "✅"
-        is RookActivation      -> "♜"
-        is ImpulseControl      -> "⚡"
-        is CandidateSearch     -> "🔍"
-        is CctCheck            -> "✔️"
-        is ConversionStrategy  -> "♛"
+        is Safety               -> "♔"
+        is CandidateMoves       -> "⚖️"
+        is WorstPiece           -> "♟"
+        is ForcingMove          -> "⚔️"
+        is OpponentPlan         -> "🔭"
+        is PreMoveChecklist     -> "✅"
+        is RookActivation       -> "♜"
+        is ImpulseControl       -> "⚡"
+        is CalculationBlunder   -> "🧮"
+        is TacticalOversight    -> "👁"
+        is CandidateSearch      -> "🔍"
+        is CctCheck             -> "✔️"
+        is ConversionStrategy   -> "♛"
         is CoordinatedAttack   -> when {
             isPlayerSide && !isLoss  -> "🗡️"
             isPlayerSide && isLoss   -> "💨"
@@ -109,20 +123,23 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             !isPlayerSide && !isLoss -> "👁️"
             else                     -> "🔓"
         }
+        is PunishBlunder       -> "🎯"
     }
 
     fun title(): String = when (this) {
-        is Safety              -> "King Safety Check"
-        is CandidateMoves      -> "Choose Your Plan"
-        is WorstPiece          -> "Worst Piece Scan"
-        is ForcingMove         -> "Forcing Moves First"
-        is OpponentPlan        -> "Opponent's Intent"
-        is PreMoveChecklist    -> "Pre-Move Checklist"
-        is RookActivation      -> "Activate Your Rook"
-        is ImpulseControl      -> "Impulse Control Check"
-        is CandidateSearch     -> "Candidate Search"
-        is CctCheck            -> "CCT Self-Check"
-        is ConversionStrategy  -> "Convert the Advantage"
+        is Safety               -> "King Safety Check"
+        is CandidateMoves       -> "Choose Your Plan"
+        is WorstPiece           -> "Worst Piece Scan"
+        is ForcingMove          -> "Forcing Moves First"
+        is OpponentPlan         -> "Opponent's Intent"
+        is PreMoveChecklist     -> "Pre-Move Checklist"
+        is RookActivation       -> "Activate Your Rook"
+        is ImpulseControl       -> "Impulse Control Check"
+        is CalculationBlunder   -> "Calculation Breakdown"
+        is TacticalOversight    -> "Tactical Oversight"
+        is CandidateSearch      -> "Candidate Search"
+        is CctCheck             -> "CCT Self-Check"
+        is ConversionStrategy   -> "Convert the Advantage"
         is CoordinatedAttack   -> when {
             isPlayerSide && !isLoss  -> "Attack Coming Together"
             isPlayerSide && isLoss   -> "Attack Has Dissolved"
@@ -135,54 +152,64 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             !isPlayerSide && !isLoss -> "Opponent Well Coordinated"
             else                     -> "Opponent Lost Coordination"
         }
+        is PunishBlunder       -> "Capitalize on the Mistake"
     }
 
     fun coachingQuestion(): String = when (this) {
         is Safety           ->
             if (threatSquare != null)
-                "The $threatSquare square is a focal point for your opponent's pieces. Is your King under immediate tactical danger there?"
+                "That $threatSquare square is getting a lot of attention from your opponent's pieces. Does your king feel safe there right now?"
             else
-                "Your King has very few defenders nearby. Are there any forcing lines that could exploit that exposure right now?"
+                "Your king doesn't have many friends nearby at the moment. Take a look — is anything pointing at it?"
         is CandidateMoves   ->
-            "This is a balanced position. Instead of finding the 'best' move, can you identify two different plans here?"
+            "The position is up for grabs right now. Before picking a move, can you sketch two different plans — even if one feels a bit risky?"
         is WorstPiece       ->
-            "Your pieces are fighting for space. Can you point to your most underdeveloped or restricted piece?"
+            "That piece on $pieceSquare hasn't had much room to breathe lately. If you could give it just one move to improve its life, what would it be?"
         is ForcingMove      ->
-            "Always check for forcing moves first. Are there any checks, captures, or threats in this position?"
+            "Before settling on a quiet move, take one more look — is there anything forcing available here? A check, a capture, a concrete threat?"
         is OpponentPlan     ->
-            "Stop. What is the strategic idea behind that last move?"
+            "Interesting move by your opponent. What do you think they were trying to set up with that?"
         is PreMoveChecklist ->
-            "Before you move: are there any loose pieces on the board? Does your opponent have an immediate threat?"
+            if (hangingSquare != null)
+                "Before you commit — take one more look at $hangingSquare. Does anything there feel like it's asking to be taken?"
+            else
+                "Before you commit — scan the board one more time. Does anything feel like it's asking to be taken?"
         is RookActivation   ->
-            "Your rook is on a closed file. Can you find an open or half-open file where it would be far more powerful?"
+            "That rook on $rookSquare is sitting on a closed file right now — it's quiet, but quiet isn't helping. If you could move it anywhere, where would it cause the most trouble?"
         is ImpulseControl   ->
-            "You played that move in under ${timeSpentSeconds}s. What was the first candidate move you saw, and why did you stop looking after that?"
+            "That one went in pretty fast — under ${timeSpentSeconds} seconds. What was the first idea you saw, and did you get a chance to check your opponent's best reply?"
+        is CalculationBlunder ->
+            "You took your time on that one — ${timeSpentSeconds} seconds. Walk me through the line you were calculating. Where did it feel like things went wrong?"
+        is TacticalOversight ->
+            "That one slipped through with ${timeSpentSeconds} seconds on the clock. What was your reasoning — did you check your opponent's most forcing reply before committing?"
         is CandidateSearch  ->
-            "The position is rich with possibilities. Can you find 2 different plans here? Don't decide until you can say why Plan A is better than Plan B."
+            "Lots of possibilities here. Can you find two different plans — one sharper, one more solid — and explain why you'd choose one over the other?"
         is CctCheck         ->
-            "Before we see what the engine thinks: are there any Checks, Captures, or Threats your opponent can play on their turn?"
+            "Before we see what the engine says — on your opponent's next turn, can they play any checks, captures, or strong threats?"
         is ConversionStrategy ->
-            "You are significantly ahead in material. What is the simplest path to victory from here — and how do you avoid unnecessary complications?"
+            "You're clearly ahead here. What's the calmest, most reliable path to the win — and is there anything that could let them back into the game?"
         is CoordinatedAttack -> when {
             isPlayerSide && !isLoss  ->
-                "Your pieces are converging on the opponent's king — which piece is the most dangerous attacker right now?"
+                "Your pieces are all pointing the same direction — that's a good sign. Which one is doing the most damage right now, and is it safe?"
             isPlayerSide && isLoss   ->
-                "Your attack has dissolved. Which piece drifted away from the attack, and can you bring it back?"
+                "The attack has faded a bit. Which piece drifted away from the action, and is there a way to bring it back?"
             !isPlayerSide && !isLoss ->
-                "Your opponent's pieces are coordinating toward your king. Which of their pieces is the most dangerous attacker?"
+                "Your opponent's pieces are coordinating toward your king. Which of their pieces is the most dangerous right now?"
             else                     ->
-                "Your opponent's attack has broken down. Can you identify why, and how can you exploit the disorganization?"
+                "Your opponent's attack has lost its steam. Can you see why — and how can you make them pay for it?"
         }
         is PieceHarmony -> when {
             isPlayerSide && !isLoss  ->
-                "Your pieces are working in harmony. Can you name the plan they are all contributing to?"
+                "Your pieces are starting to work together nicely. Can you name the plan they're all contributing to?"
             isPlayerSide && isLoss   ->
-                "Your pieces have lost their coordination. Which piece is now misplaced, and can you re-route it in one move?"
+                "Your pieces seem to have drifted onto different ideas. Which one is most out of place right now?"
             !isPlayerSide && !isLoss ->
-                "Your opponent's pieces are well coordinated. What plan do they support, and how can you disrupt it?"
+                "Your opponent's pieces are well coordinated. What plan do they support, and is there a way to disrupt it?"
             else                     ->
-                "Your opponent's piece coordination has broken down. Can you open the position now to exploit the disorganization?"
+                "Your opponent's coordination has broken down. Can you open things up and take advantage before they regroup?"
         }
+        is PunishBlunder ->
+            "Your opponent just played a move that worsens their position. What do you think is the tactical justification for their move — and can you punish their inaccuracy?"
     }
 
     /**
@@ -196,29 +223,57 @@ sealed class CoachingTrigger(val moveIndex: Int) {
      * Tier 0 — ConversionStrategy: always displayed independently; immune to tier filtering.
      */
     fun tier(): Int = when (this) {
-        is Safety, is ForcingMove, is PreMoveChecklist, is ImpulseControl -> 1
-        is CctCheck, is OpponentPlan                                       -> 2
-        is CoordinatedAttack, is PieceHarmony                              -> 3
+        is ImpulseControl                                                        -> 0
+        is Safety, is ForcingMove, is PreMoveChecklist, is CalculationBlunder,
+        is TacticalOversight, is PunishBlunder                                   -> 1
+        is CctCheck, is OpponentPlan                                             -> 2
+        is CoordinatedAttack, is PieceHarmony                                   -> 3
         is WorstPiece, is RookActivation, is CandidateMoves, is CandidateSearch -> 4
-        is ConversionStrategy                                              -> 0
+        is ConversionStrategy                                                    -> 0
+    }
+
+    /**
+     * Sub-priority within a tier for single-voice selection.
+     * Lower number = shown preferentially when multiple triggers survive tier filtering.
+     */
+    fun subPriority(): Int = when (this) {
+        is Safety               -> 1
+        is ForcingMove          -> 2
+        is PreMoveChecklist     -> 3
+        is ImpulseControl       -> 4
+        is CalculationBlunder   -> 5
+        is TacticalOversight    -> 5
+        is CctCheck             -> 6
+        is OpponentPlan         -> 7
+        is CoordinatedAttack    -> 8
+        is PieceHarmony         -> 9
+        is WorstPiece           -> 10
+        is CandidateMoves       -> 11
+        is CandidateSearch      -> 12
+        is RookActivation       -> 13
+        is ConversionStrategy   -> 14
+        is PunishBlunder        -> 2
     }
 
     // ── Display label used in Reflection Mode selection lists ─────────────────
 
     fun displayLabel(): String = when (this) {
-        is Safety              -> "Safety Issue"
-        is CandidateMoves      -> "Multiple Plans"
-        is WorstPiece          -> "Restricted Piece"
-        is ForcingMove         -> "Forcing Move"
-        is OpponentPlan        -> "Opponent's Plan"
-        is PreMoveChecklist    -> "Pre-Move Check"
-        is RookActivation      -> "Rook Activation"
-        is ImpulseControl      -> "Impulse Move"
-        is CandidateSearch     -> "Depth Search"
-        is CctCheck            -> "CCT Check"
-        is ConversionStrategy  -> "Conversion Strategy"
-        is CoordinatedAttack   -> "Coordinated Attack"
-        is PieceHarmony        -> "Piece Harmony"
+        is Safety               -> "Safety Issue"
+        is CandidateMoves       -> "Multiple Plans"
+        is WorstPiece           -> "Restricted Piece"
+        is ForcingMove          -> "Forcing Move"
+        is OpponentPlan         -> "Opponent's Plan"
+        is PreMoveChecklist     -> "Pre-Move Check"
+        is RookActivation       -> "Rook Activation"
+        is ImpulseControl       -> "Impulse Move"
+        is CalculationBlunder   -> "Calculation Error"
+        is TacticalOversight    -> "Tactical Oversight"
+        is CandidateSearch      -> "Depth Search"
+        is CctCheck             -> "CCT Check"
+        is ConversionStrategy   -> "Conversion Strategy"
+        is CoordinatedAttack    -> "Coordinated Attack"
+        is PieceHarmony         -> "Piece Harmony"
+        is PunishBlunder        -> "Punish Blunder"
     }
 
     companion object {
@@ -226,8 +281,8 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         val ALL_LABELS = listOf(
             "Safety Issue", "Multiple Plans", "Restricted Piece",
             "Forcing Move", "Opponent's Plan", "Pre-Move Check", "Rook Activation",
-            "Impulse Move", "Depth Search", "CCT Check", "Conversion Strategy",
-            "Coordinated Attack", "Piece Harmony",
+            "Impulse Move", "Calculation Error", "Tactical Oversight", "Depth Search", "CCT Check", "Conversion Strategy",
+            "Coordinated Attack", "Piece Harmony", "Punish Blunder",
         )
 
         /** Reconstruct a minimal trigger stub from a stored type name (no geometry data needed). */
@@ -240,11 +295,14 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             "PRE_MOVE_CHECKLIST"   -> PreMoveChecklist(moveIndex, null)
             "ROOK_ACTIVATION"      -> RookActivation(moveIndex, "", 0)
             "IMPULSE_CONTROL"      -> ImpulseControl(moveIndex, 0, 0)
+            "CALCULATION_BLUNDER"  -> CalculationBlunder(moveIndex, 0, 0)
+            "TACTICAL_OVERSIGHT"   -> TacticalOversight(moveIndex, 0, 0)
             "CANDIDATE_SEARCH"     -> CandidateSearch(moveIndex, 0)
             "CCT_CHECK"            -> CctCheck(moveIndex, 0)
             "CONVERSION_STRATEGY"  -> ConversionStrategy(moveIndex, 0)
             "COORDINATED_ATTACK"   -> CoordinatedAttack(moveIndex, isPlayerSide = true, isLoss = false, pieceCount = 0)
             "PIECE_HARMONY"        -> PieceHarmony(moveIndex, isPlayerSide = true, isLoss = false, score = 0)
+            "PUNISH_BLUNDER"       -> PunishBlunder(moveIndex, 0)
             else                   -> null
         }
     }
