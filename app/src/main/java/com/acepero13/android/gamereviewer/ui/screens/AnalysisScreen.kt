@@ -51,6 +51,8 @@ import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material3.Button
@@ -230,6 +232,19 @@ fun AnalysisScreen(
         (state.showProactiveCoaching || state.guidedDiscoveryMode ||
          state.showMiddlegamePlanPanel || state.showEndgameRecognitionPanel)
 
+    val hasCoachContent = state.showProactiveCoaching ||
+                          state.guidedDiscoveryMode   ||
+                          state.reviewMode == ReviewMode.MENTOR ||
+                          state.showOpeningDeviationPanel ||
+                          state.showEndgameRecognitionPanel ||
+                          state.showMiddlegamePlanPanel
+
+    var boardCollapsed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(hasCoachContent) {
+        boardCollapsed = hasCoachContent
+    }
+
     Scaffold(
         containerColor = WCDark,
         snackbarHost   = { SnackbarHost(snackbar) },
@@ -383,19 +398,52 @@ fun AnalysisScreen(
             }
 
             // ── Chess board (with Blunder Guard border flash) ──────────────────
-            BoardWithBlunderFlash(
-                state           = state,
-                onArrow         = { f, t -> vm.onArrowDrawn(f, t) },
-                onMark          = { sq -> vm.onSquareMarked(sq) },
-                onTap           = { sq ->
-                    if (state.reviewMode == ReviewMode.ANALYSE &&
-                        state.analyseSubMode == AnalyseSubMode.EXPLORE) {
-                        vm.onSandboxSquareTap(sq)
+            AnimatedVisibility(
+                visible = !boardCollapsed,
+                enter   = expandVertically() + fadeIn(),
+                exit    = shrinkVertically() + fadeOut(),
+            ) {
+                BoardWithBlunderFlash(
+                    state           = state,
+                    onArrow         = { f, t -> vm.onArrowDrawn(f, t) },
+                    onMark          = { sq -> vm.onSquareMarked(sq) },
+                    onTap           = { sq ->
+                        if (state.reviewMode == ReviewMode.ANALYSE &&
+                            state.analyseSubMode == AnalyseSubMode.EXPLORE) {
+                            vm.onSandboxSquareTap(sq)
+                        }
+                    },
+                    onMentorTap     = { sq -> vm.onMentorSquareTap(sq) },
+                    onProactiveTap  = { sq -> vm.answerProactiveQuestion(sq) },
+                )
+            }
+
+            // ── Board collapse toggle — visible when coach/mentor content is shown ──
+            if (hasCoachContent) {
+                Row(
+                    modifier          = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    TextButton(
+                        onClick = { boardCollapsed = !boardCollapsed },
+                        colors  = ButtonDefaults.textButtonColors(
+                            contentColor = BtnInactive,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector        = if (boardCollapsed) Icons.Outlined.KeyboardArrowDown
+                                                 else Icons.Outlined.KeyboardArrowUp,
+                            contentDescription = if (boardCollapsed) "Show board" else "Hide board",
+                            modifier           = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text  = if (boardCollapsed) "Show board" else "Hide board",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                     }
-                },
-                onMentorTap     = { sq -> vm.onMentorSquareTap(sq) },
-                onProactiveTap  = { sq -> vm.answerProactiveQuestion(sq) },
-            )
+                }
+            }
 
             // Sandbox engine-thinking stripe
             if (state.sandboxEngineThinking &&

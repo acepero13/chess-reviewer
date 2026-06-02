@@ -1378,7 +1378,7 @@ class AnalysisViewModel(
             _uiState.update {
                 it.copy(
                     reviewMode                    = ReviewMode.MENTOR,
-                    previousReviewMode            = from,
+                    previousReviewMode            = if (from == ReviewMode.MENTOR) it.previousReviewMode else from,
                     guidedDiscoveryMode           = true,
                     guidedDiscoveryInsight        = insight,
                     guidedDiscoveryCriticalMoment = moment,
