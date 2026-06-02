@@ -1,5 +1,8 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,11 +12,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -21,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,12 +35,19 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.BehavioralProfileCard
 import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
+import com.acepero13.android.gamereviewer.ui.components.PhaseBreakdownCard
+import com.acepero13.android.gamereviewer.ui.components.TopCoachTriggerCard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.WCDark
 import org.koin.androidx.compose.koinViewModel
@@ -43,10 +56,14 @@ import org.koin.androidx.compose.koinViewModel
  * Cross-game Cognitive Diagnostic Dashboard (Task 4.3).
  *
  * Displays:
- * - Global stats: games imported, games analysed, total critical moments.
+ * - Global stats: games imported, games analysed, total critical moments, habit mastery.
  * - Top 3 failure trends as [BehavioralProfileCard] rows.
  * - "Wishful Thinking" warning card if detected.
+ * - Board Scan habit mastery progress.
+ * - Endgame weaknesses.
  * - Prompt to analyse more games if < 3 have been processed.
+ *
+ * All major sections are collapsible.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,7 +120,21 @@ fun DashboardScreen(
         ) {
 
             // ── Global stats ──────────────────────────────────────────────────
-            GlobalStatsCard(state = state)
+            CollapsibleSection(title = "Overview") {
+                GlobalStatsCard(state = state)
+            }
+
+            // ── Phase breakdown ───────────────────────────────────────────────
+            state.phaseBreakdown?.let { breakdown ->
+                if (breakdown.total > 0) {
+                    CollapsibleSection(title = "Phase Breakdown") {
+                        PhaseBreakdownCard(
+                            breakdown = breakdown,
+                            modifier  = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
 
             // ── Wishful thinking warning ──────────────────────────────────────
             if (state.hasWishfulThinking) {
@@ -128,31 +159,42 @@ fun DashboardScreen(
                 }
             }
 
+            // ── Top coach trigger (focus habit) ──────────────────────────────
+            state.topCoachTrigger?.let { trigger ->
+                CollapsibleSection(title = "Focus Habit") {
+                    TopCoachTriggerCard(
+                        trigger  = trigger,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
             // ── Board Scan habit progress ─────────────────────────────────────
             if (state.habitRows.isNotEmpty()) {
-                HabitProgressCard(
-                    rows     = state.habitRows,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                CollapsibleSection(title = "Board Scan Habits") {
+                    HabitProgressCard(
+                        rows      = state.habitRows,
+                        modifier  = Modifier.fillMaxWidth(),
+                        showTitle = false,
+                    )
+                }
             }
 
             // ── Failure trends ────────────────────────────────────────────────
             if (state.trends.isNotEmpty()) {
-                Text(
-                    "Your Top Failure Patterns",
-                    style      = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = ChessGold,
-                )
-                state.trends.forEach { trend ->
-                    BehavioralProfileCard(
-                        trend        = trend,
-                        modifier     = Modifier.fillMaxWidth(),
-                        onStartDrill = onStartDrill?.let { callback -> {
-                            val cats = trend.triggerCategories.joinToString(",") { it.name }
-                            callback(cats, "${trend.emoji} ${trend.title}")
-                        }},
-                    )
+                CollapsibleSection(title = "Your Top Failure Patterns") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        state.trends.forEach { trend ->
+                            BehavioralProfileCard(
+                                trend        = trend,
+                                modifier     = Modifier.fillMaxWidth(),
+                                onStartDrill = onStartDrill?.let { callback -> {
+                                    val cats = trend.triggerCategories.joinToString(",") { it.name }
+                                    callback(cats, "${trend.emoji} ${trend.title}")
+                                }},
+                            )
+                        }
+                    }
                 }
             } else if (state.gamesAnalyzed > 0) {
                 Card(
@@ -188,47 +230,45 @@ fun DashboardScreen(
 
             // ── Endgame weaknesses ─────────────────────────────────────────────
             if (state.endgameWeaknesses.isNotEmpty()) {
-                Text(
-                    "Endgame Weaknesses",
-                    style      = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = ChessGold,
-                )
-                Text(
-                    "Endgame types where you made critical mistakes — study the corresponding chapters in 100 Endgames You Should Know.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                state.endgameWeaknesses.forEachIndexed { i, row ->
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Row(
-                            modifier            = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment   = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Text(
-                                text  = "${i + 1}",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = ChessGold,
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text       = row.name,
-                                    style      = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    text  = "Chapter ${row.chapter}  ·  ${row.gamesEncountered} game${if (row.gamesEncountered != 1) "s" else ""}, ${row.gamesWithMistake} with mistakes",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                )
+                CollapsibleSection(title = "Endgame Weaknesses") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text  = "Endgame types where you made critical mistakes — study the corresponding chapters in 100 Endgames You Should Know.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                        state.endgameWeaknesses.forEachIndexed { i, row ->
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Row(
+                                    modifier              = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Text(
+                                        text       = "${i + 1}",
+                                        style      = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color      = ChessGold,
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text       = row.name,
+                                            style      = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            text  = "Chapter ${row.chapter}  ·  ${row.gamesEncountered} game${if (row.gamesEncountered != 1) "s" else ""}, ${row.gamesWithMistake} with mistakes",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -241,21 +281,54 @@ fun DashboardScreen(
 }
 
 @Composable
+private fun CollapsibleSection(
+    title:   String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(true) }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label       = "chevron",
+    )
+    Column(modifier = modifier) {
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text       = title,
+                style      = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            Icon(
+                imageVector        = Icons.Outlined.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint               = ChessGold,
+                modifier           = Modifier.rotate(rotation),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            content()
+        }
+    }
+}
+
+@Composable
 private fun GlobalStatsCard(state: DashboardUiState) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape  = RoundedCornerShape(12.dp),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier            = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                "Overview",
-                style      = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color      = ChessGold,
-            )
             Row(
                 modifier              = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -263,6 +336,34 @@ private fun GlobalStatsCard(state: DashboardUiState) {
                 StatColumn(label = "Games\nImported", value = "${state.totalGamesImported}")
                 StatColumn(label = "Games\nAnalysed", value = "${state.gamesAnalyzed}")
                 StatColumn(label = "Critical\nMoments",  value = "${state.totalCriticalMoments}")
+            }
+            if (state.habitRows.isNotEmpty()) {
+                val mastered = state.habitRows.count { it.mastered }
+                val total    = state.habitRows.size
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text     = "Habits",
+                        style    = MaterialTheme.typography.labelSmall,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(40.dp),
+                    )
+                    LinearProgressIndicator(
+                        progress   = { mastered.toFloat() / total },
+                        modifier   = Modifier.weight(1f).height(6.dp),
+                        color      = ChessGold,
+                        trackColor = ChessGold.copy(alpha = 0.2f),
+                        strokeCap  = StrokeCap.Round,
+                    )
+                    Text(
+                        text  = "$mastered / $total",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ChessGold,
+                    )
+                }
             }
         }
     }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.EndgameEncounterDao
+import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
@@ -33,6 +34,25 @@ data class EndgameWeaknessRow(
     val gamesWithMistake: Int,
 )
 
+/** The single coaching habit the user should focus on next. */
+data class TopCoachTrigger(
+    val label:    String,  // display label, e.g. "Forcing Move"
+    val typeName: String,  // e.g. "FORCING_MOVE"
+    val streak:   Int,
+    val emoji:    String,
+    val title:    String,
+    val tier:     Int,
+)
+
+data class PhaseBreakdown(
+    val opening:    Int,
+    val middlegame: Int,
+    val endgame:    Int,
+) {
+    val total: Int = opening + middlegame + endgame
+    fun fraction(count: Int): Float = if (total == 0) 0f else count.toFloat() / total
+}
+
 data class DashboardUiState(
     val isLoading: Boolean = true,
     val totalGamesImported: Int = 0,
@@ -42,6 +62,8 @@ data class DashboardUiState(
     val hasWishfulThinking: Boolean = false,
     val habitRows: List<HabitMasteryRow> = emptyList(),
     val endgameWeaknesses: List<EndgameWeaknessRow> = emptyList(),
+    val phaseBreakdown: PhaseBreakdown? = null,
+    val topCoachTrigger: TopCoachTrigger? = null,
     val error: String? = null,
 )
 
@@ -51,6 +73,18 @@ data class DashboardUiState(
  * Loads all [com.acepero13.android.gamereviewer.data.model.CriticalMoment] records,
  * runs [BehavioralDiagnostic.diagnose], and exposes the top 3 failure trends.
  */
+// Classifies a moment into one of three phases.
+// Explicit reason categories take priority; move index is the fallback.
+private fun CriticalMoment.gamePhase(): String = when (toReason()) {
+    CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "opening"
+    CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "endgame"
+    else -> when {
+        moveIndex <= 15 -> "opening"
+        moveIndex <= 40 -> "middlegame"
+        else            -> "endgame"
+    }
+}
+
 class DashboardViewModel(
     private val repo: GameRepository,
     private val criticalMomentDao: CriticalMomentDao,
@@ -87,6 +121,33 @@ class DashboardViewModel(
                     )
                 }
 
+                // Lowest streak among non-mastered, with tier as tiebreaker (tier 1 = most critical).
+                val topCoachTrigger = habitRows
+                    .filter { !it.mastered }
+                    .mapNotNull { row ->
+                        val stub = CoachingTrigger.fromTypeName(row.typeName, 0)
+                            ?: return@mapNotNull null
+                        Triple(row, stub.tier(), stub)
+                    }
+                    .sortedWith(compareBy({ it.first.streak }, { it.second }))
+                    .firstOrNull()
+                    ?.let { (row, _, stub) ->
+                        TopCoachTrigger(
+                            label    = row.label,
+                            typeName = row.typeName,
+                            streak   = row.streak,
+                            emoji    = stub.emoji(),
+                            title    = stub.title(),
+                            tier     = stub.tier(),
+                        )
+                    }
+
+                val phaseBreakdown = PhaseBreakdown(
+                    opening    = allMoments.count { it.gamePhase() == "opening" },
+                    middlegame = allMoments.count { it.gamePhase() == "middlegame" },
+                    endgame    = allMoments.count { it.gamePhase() == "endgame" },
+                )
+
                 val allEncounters = endgameEncounterDao.getAll()
                 val endgameWeaknesses = allEncounters
                     .groupBy { it.chapter }
@@ -113,6 +174,8 @@ class DashboardViewModel(
                         hasWishfulThinking     = wishful,
                         habitRows              = habitRows,
                         endgameWeaknesses      = endgameWeaknesses,
+                        phaseBreakdown         = phaseBreakdown,
+                        topCoachTrigger        = topCoachTrigger,
                     )
                 }
             } catch (e: Exception) {

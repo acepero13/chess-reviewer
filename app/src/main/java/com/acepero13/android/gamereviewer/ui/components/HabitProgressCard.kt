@@ -45,8 +45,9 @@ private val InProgress  = Color(0xFF2D6A4F)
  */
 @Composable
 fun HabitProgressCard(
-    rows:     List<HabitMasteryRow>,
-    modifier: Modifier = Modifier,
+    rows:      List<HabitMasteryRow>,
+    modifier:  Modifier = Modifier,
+    showTitle: Boolean = true,
 ) {
     if (rows.isEmpty()) return
 
@@ -60,12 +61,14 @@ fun HabitProgressCard(
             modifier            = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text       = "Board Scan Habits",
-                style      = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color      = ChessGold,
-            )
+            if (showTitle) {
+                Text(
+                    text       = "Board Scan Habits",
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = ChessGold,
+                )
+            }
             Text(
                 text  = "Correctly identify each pattern ${TriggerMasteryRepository.MASTERY_THRESHOLD}× in Reflection Mode to master it — the Coach Lamp then goes silent for that habit.",
                 style = MaterialTheme.typography.bodySmall,
