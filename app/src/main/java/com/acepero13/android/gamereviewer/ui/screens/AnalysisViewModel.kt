@@ -494,6 +494,22 @@ class AnalysisViewModel(
         persistAnnotation(upd)
     }
 
+    fun undoLastArrow() {
+        val cur = _uiState.value.boardState
+        if (cur.userArrows.isEmpty()) return
+        val upd = cur.copy(userArrows = cur.userArrows.dropLast(1))
+        _uiState.update { it.copy(boardState = upd) }
+        persistAnnotation(upd)
+    }
+
+    fun clearArrows() {
+        val cur = _uiState.value.boardState
+        if (cur.userArrows.isEmpty()) return
+        val upd = cur.copy(userArrows = emptyList())
+        _uiState.update { it.copy(boardState = upd) }
+        persistAnnotation(upd)
+    }
+
     fun updateMoveComment(comment: String) {
         _uiState.update { it.copy(currentComment = comment) }
         viewModelScope.launch(Dispatchers.IO) {

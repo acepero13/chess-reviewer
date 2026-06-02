@@ -604,9 +604,10 @@ fun AnalysisScreen(
                         }
 
                         NavigateModeContent(
-                            entries     = state.treeItems,
-                            onNodeClick = vm::onMoveNodeClick,
-                            modifier    = Modifier.fillMaxWidth().weight(1f),
+                            entries        = state.treeItems,
+                            onNodeClick    = vm::onMoveNodeClick,
+                            currentComment = state.currentComment,
+                            modifier       = Modifier.fillMaxWidth().weight(1f),
                         )
                     }
                     ReviewMode.ANALYSE  -> AnalysePanel(

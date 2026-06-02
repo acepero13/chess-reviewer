@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Comment
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material3.AlertDialog
@@ -223,6 +225,40 @@ private fun EditSubMode(
             selectedColor   = state.currentArrowColor,
             onColorSelected = vm::setArrowColor,
         )
+
+        // Undo / Clear toolbar
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            val hasArrows = state.boardState.userArrows.isNotEmpty()
+            FilledTonalButton(
+                onClick  = vm::undoLastArrow,
+                enabled  = hasArrows,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Outlined.Undo,
+                    contentDescription = "Undo last arrow",
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Undo", style = MaterialTheme.typography.labelMedium)
+            }
+            FilledTonalButton(
+                onClick  = vm::clearArrows,
+                enabled  = hasArrows,
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(
+                    Icons.Outlined.ClearAll,
+                    contentDescription = "Clear all arrows",
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Clear", style = MaterialTheme.typography.labelMedium)
+            }
+        }
 
         // Compact comment chip — tapping opens the dialog
         CommentChip(
