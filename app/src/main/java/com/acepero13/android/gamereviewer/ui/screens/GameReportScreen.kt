@@ -1,15 +1,18 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -167,6 +170,18 @@ private fun OverviewTabContent(
         // ── Narrative summary ─────────────────────────────────────────────
         state.narrative?.let { NarrativeSummaryCard(it) }
 
+        // ── Self-awareness score ───────────────────────────────────────────
+        state.selfAwareness?.takeIf { it.total > 0 }?.let { SelfAwarenessCard(it) }
+
+        // ── Move quality distribution ──────────────────────────────────────
+        if (state.moveQualityCounts.isNotEmpty()) {
+            MoveQualityCard(state.moveQualityCounts)
+        }
+
+        // ── Phase accuracy ─────────────────────────────────────────────────
+        state.phaseAccuracy?.takeIf { it.hasOpening || it.hasMiddlegame || it.hasEndgame }
+            ?.let { PhaseAccuracyCard(it) }
+
         // ── Decision Velocity chart ────────────────────────────────────────
         if (state.hasTimeData) {
             DecisionVelocityChart(
@@ -199,6 +214,16 @@ private fun OverviewTabContent(
         // ── Eval-only summary when no time data ───────────────────────────
         if (!state.hasTimeData && state.evaluations.isNotEmpty()) {
             EvalOnlySummaryCard(evaluations = state.evaluations)
+        }
+
+        // ── Mistake reason breakdown ───────────────────────────────────────
+        if (state.mistakeReasons.isNotEmpty()) {
+            MistakeReasonsCard(state.mistakeReasons)
+        }
+
+        // ── Best moments ───────────────────────────────────────────────────
+        if (state.bestMoments.isNotEmpty()) {
+            BestMomentsCard(state.bestMoments)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -409,6 +434,312 @@ private fun InsightChip(emoji: String, message: String) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
+        }
+    }
+}
+
+// ── Self-awareness card ───────────────────────────────────────────────────────
+
+@Composable
+private fun SelfAwarenessCard(data: SelfAwarenessData) {
+    val score = data.score
+    val barColor = when {
+        score >= 0.7f -> Color(0xFF4CAF50)
+        score >= 0.4f -> Color(0xFFFFC107)
+        else          -> Color(0xFFEF5350)
+    }
+    val insight = when {
+        score >= 0.7f -> "Great intuition — you spotted most critical moments yourself."
+        score >= 0.4f -> "Decent awareness — some moments caught you by surprise."
+        else          -> "Many critical moments were missed during self-review."
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Self-Awareness",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "${data.noticed}",
+                    style      = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = barColor,
+                )
+                Text(
+                    "/ ${data.total}",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "engine-flagged moments\nyou self-identified",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .background(
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
+                        RoundedCornerShape(4.dp),
+                    ),
+            ) {
+                if (score > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = score.coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .background(barColor, RoundedCornerShape(4.dp)),
+                    )
+                }
+            }
+            Text(insight, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ── Move quality distribution card ───────────────────────────────────────────
+
+private val qualityOrder = listOf(
+    "Best Move", "Excellent", "Good Move", "Inaccuracy", "Mistake", "Blunder", "Book Move",
+)
+
+private fun qualityColor(label: String): Color = when (label) {
+    "Best Move"  -> Color(0xFF4CAF50)
+    "Excellent"  -> Color(0xFF8BC34A)
+    "Good Move"  -> Color(0xFF2196F3)
+    "Inaccuracy" -> Color(0xFFFFC107)
+    "Mistake"    -> Color(0xFFFF9800)
+    "Blunder"    -> Color(0xFFEF5350)
+    else         -> Color(0xFF9E9E9E)
+}
+
+@Composable
+private fun MoveQualityCard(counts: Map<String, Int>) {
+    val ordered = qualityOrder.mapNotNull { label ->
+        counts[label]?.let { label to it }
+    }
+    if (ordered.isEmpty()) return
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Move Quality",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            ordered.chunked(2).forEach { pair ->
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    pair.forEach { (label, count) ->
+                        Row(
+                            modifier          = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(10.dp)
+                                    .height(10.dp)
+                                    .background(qualityColor(label), RoundedCornerShape(2.dp)),
+                            )
+                            Text(
+                                "$count",
+                                style      = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color      = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                label,
+                                style    = MaterialTheme.typography.labelSmall,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+// ── Phase accuracy card ───────────────────────────────────────────────────────
+
+@Composable
+private fun PhaseAccuracyCard(data: PhaseAccuracyData) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Phase Accuracy",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            Text(
+                "Average centipawn loss per phase",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (data.hasOpening)    PhaseColumn(Modifier.weight(1f), "Opening",    data.openingAvgCpl)
+                if (data.hasMiddlegame) PhaseColumn(Modifier.weight(1f), "Middlegame", data.middlegameAvgCpl)
+                if (data.hasEndgame)    PhaseColumn(Modifier.weight(1f), "Endgame",    data.endgameAvgCpl)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhaseColumn(modifier: Modifier, label: String, avgCpl: Float) {
+    val accuracy = (100f - avgCpl * 0.5f).coerceIn(0f, 100f)
+    val color = when {
+        avgCpl <= 20f -> Color(0xFF4CAF50)
+        avgCpl <= 50f -> Color(0xFFFFC107)
+        else          -> Color(0xFFEF5350)
+    }
+    Column(
+        modifier            = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            "%.0f%%".format(accuracy),
+            style      = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color      = color,
+        )
+        Text(
+            "%.0f cp".format(avgCpl),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+// ── Mistake reasons card ──────────────────────────────────────────────────────
+
+@Composable
+private fun MistakeReasonsCard(reasons: List<ReasonBreakdownData>) {
+    val maxSeverity = reasons.maxOf { it.severity }.coerceAtLeast(1)
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Mistake Breakdown",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            reasons.forEach { reason ->
+                val fraction = reason.severity.toFloat() / maxSeverity
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            reason.label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            "${reason.count}×  ${reason.severity} cp",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
+                                RoundedCornerShape(3.dp),
+                            ),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(fraction = fraction)
+                                .fillMaxHeight()
+                                .background(Color(0xFFEF5350), RoundedCornerShape(3.dp)),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Best moments card ─────────────────────────────────────────────────────────
+
+@Composable
+private fun BestMomentsCard(moments: List<BestMomentData>) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Your Best Moves",
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = ChessGold,
+            )
+            Text(
+                "Engine top-1 played in contested positions",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            moments.forEach { moment ->
+                Row(
+                    verticalAlignment      = Alignment.CenterVertically,
+                    horizontalArrangement  = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("★", color = ChessGold, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        moment.moveLabel,
+                        style      = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color      = MaterialTheme.colorScheme.onSurface,
+                    )
+                    val evalText = when {
+                        moment.evalCp > 0  -> "+${"%.1f".format(moment.evalCp / 100f)}"
+                        moment.evalCp < 0  -> "${"%.1f".format(moment.evalCp / 100f)}"
+                        else               -> "0.0"
+                    }
+                    Text(
+                        evalText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

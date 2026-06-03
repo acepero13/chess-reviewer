@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
+import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
@@ -26,6 +27,34 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+data class PhaseAccuracyData(
+    val openingAvgCpl: Float = 0f,
+    val middlegameAvgCpl: Float = 0f,
+    val endgameAvgCpl: Float = 0f,
+    val hasOpening: Boolean = false,
+    val hasMiddlegame: Boolean = false,
+    val hasEndgame: Boolean = false,
+)
+
+data class ReasonBreakdownData(
+    val label: String,
+    val severity: Int,
+    val count: Int,
+    val category: CriticalMoment.ReasonCategory,
+)
+
+data class SelfAwarenessData(
+    val noticed: Int,
+    val total: Int,
+) {
+    val score: Float get() = if (total == 0) 0f else noticed.toFloat() / total.toFloat()
+}
+
+data class BestMomentData(
+    val moveLabel: String,
+    val evalCp: Int,
+)
 
 data class MoveListEntry(
     val moveNumber: Int,
@@ -63,6 +92,12 @@ data class GameReportUiState(
 
     val narrative: GameNarrativeSummary.Summary? = null,
     val moveListEntries: List<MoveListEntry> = emptyList(),
+
+    val moveQualityCounts: Map<String, Int> = emptyMap(),
+    val phaseAccuracy: PhaseAccuracyData? = null,
+    val mistakeReasons: List<ReasonBreakdownData> = emptyList(),
+    val selfAwareness: SelfAwarenessData? = null,
+    val bestMoments: List<BestMomentData> = emptyList(),
 
     val error: String? = null,
 )
@@ -103,7 +138,12 @@ class GameReportViewModel(
                 val narrative = game?.let {
                     GameNarrativeSummary.build(it, moments, username)
                 }
-                val moveList = game?.let { buildMoveList(it.movesUci, evals) } ?: emptyList()
+                val moveList       = game?.let { buildMoveList(it.movesUci, evals) } ?: emptyList()
+                val phaseAccuracy  = computePhaseAccuracy(evals)
+                val moveQuality    = computeMoveQualityCounts(moveList)
+                val mistakeReasons = computeMistakeReasons(moments)
+                val selfAwareness  = computeSelfAwareness(moments)
+                val bestMoments    = computeBestMoments(moveList, evals)
 
                 _uiState.update {
                     it.copy(
@@ -118,15 +158,120 @@ class GameReportViewModel(
                         carefulBlunders = TimeAnalyzer.countCarefulBlunders(decisions),
                         avgTimeOnBlunders  = TimeAnalyzer.avgTimeOnBlunders(decisions),
                         avgTimeOnGoodMoves = TimeAnalyzer.avgTimeOnGoodMoves(decisions),
-                        hasTimeData     = times.isNotEmpty(),
-                        narrative       = narrative,
-                        moveListEntries = moveList,
+                        hasTimeData       = times.isNotEmpty(),
+                        narrative         = narrative,
+                        moveListEntries   = moveList,
+                        moveQualityCounts = moveQuality,
+                        phaseAccuracy     = phaseAccuracy,
+                        mistakeReasons    = mistakeReasons,
+                        selfAwareness     = selfAwareness,
+                        bestMoments       = bestMoments,
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
+    }
+
+    // ── Insight computations ──────────────────────────────────────────────────
+
+    private fun computePhaseAccuracy(evals: List<GameEvaluation>): PhaseAccuracyData {
+        fun cpls(list: List<GameEvaluation>) = list.map { ev ->
+            val loss = if (ev.moveIndex % 2 == 1) -ev.evalDelta else ev.evalDelta
+            maxOf(0, loss)
+        }
+        val opening    = evals.filter { it.moveIndex <= 20 }
+        val middlegame = evals.filter { it.moveIndex in 21..60 }
+        val endgame    = evals.filter { it.moveIndex > 60 }
+        return PhaseAccuracyData(
+            openingAvgCpl    = cpls(opening).let    { if (it.isEmpty()) 0f else it.average().toFloat() },
+            middlegameAvgCpl = cpls(middlegame).let { if (it.isEmpty()) 0f else it.average().toFloat() },
+            endgameAvgCpl    = cpls(endgame).let   { if (it.isEmpty()) 0f else it.average().toFloat() },
+            hasOpening       = opening.isNotEmpty(),
+            hasMiddlegame    = middlegame.isNotEmpty(),
+            hasEndgame       = endgame.isNotEmpty(),
+        )
+    }
+
+    private fun computeMoveQualityCounts(moveList: List<MoveListEntry>): Map<String, Int> {
+        val counts = mutableMapOf<String, Int>()
+        for (entry in moveList) {
+            counts[entry.assessWhite] = (counts[entry.assessWhite] ?: 0) + 1
+            entry.assessBlack?.let { counts[it] = (counts[it] ?: 0) + 1 }
+        }
+        return counts
+    }
+
+    private fun computeMistakeReasons(moments: List<CriticalMoment>): List<ReasonBreakdownData> =
+        moments
+            .groupBy { it.toReason() }
+            .map { (reason, list) ->
+                ReasonBreakdownData(
+                    label    = reasonLabel(reason),
+                    severity = list.sumOf { it.severity },
+                    count    = list.size,
+                    category = reason,
+                )
+            }
+            .sortedByDescending { it.severity }
+            .take(5)
+
+    private fun computeSelfAwareness(moments: List<CriticalMoment>): SelfAwarenessData {
+        val engineMarked = moments.filter { it.toType() == CriticalMoment.Type.ENGINE_MARKED }
+        val userIndices  = moments
+            .filter { it.toType() == CriticalMoment.Type.USER_MARKED }
+            .map { it.moveIndex }
+            .toSet()
+        return SelfAwarenessData(
+            noticed = engineMarked.count { it.moveIndex in userIndices },
+            total   = engineMarked.size,
+        )
+    }
+
+    private fun computeBestMoments(
+        moveList: List<MoveListEntry>,
+        evals: List<GameEvaluation>,
+    ): List<BestMomentData> {
+        val evalByIndex = evals.associateBy { it.moveIndex }
+        data class Candidate(val data: BestMomentData, val prevAbsEval: Int)
+
+        val candidates = mutableListOf<Candidate>()
+        for (entry in moveList) {
+            val wi = entry.moveNumber * 2 - 1
+            if (entry.assessWhite == "Best Move") {
+                val prevAbs = kotlin.math.abs(evalByIndex[wi - 1]?.evalCp ?: 0)
+                if (prevAbs <= 300) {
+                    candidates += Candidate(
+                        BestMomentData("${entry.moveNumber}. ${entry.whiteSan}", entry.evalWhiteCp),
+                        prevAbs,
+                    )
+                }
+            }
+            entry.blackSan?.let { bSan ->
+                if (entry.assessBlack == "Best Move") {
+                    val prevAbs = kotlin.math.abs(entry.evalWhiteCp)
+                    if (prevAbs <= 300) {
+                        candidates += Candidate(
+                            BestMomentData("${entry.moveNumber}... $bSan", entry.evalBlackCp ?: 0),
+                            prevAbs,
+                        )
+                    }
+                }
+            }
+        }
+        return candidates.sortedBy { it.prevAbsEval }.map { it.data }.take(3)
+    }
+
+    private fun reasonLabel(reason: CriticalMoment.ReasonCategory) = when (reason) {
+        CriticalMoment.ReasonCategory.MISSED_TACTIC     -> "Missed Tactics"
+        CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "Opening Gap"
+        CriticalMoment.ReasonCategory.HANGING_PIECE     -> "Hanging Pieces"
+        CriticalMoment.ReasonCategory.KING_SAFETY       -> "King Safety"
+        CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "Endgame Technique"
+        CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE -> "Strategic Errors"
+        CriticalMoment.ReasonCategory.TIME_PRESSURE     -> "Time Pressure"
+        CriticalMoment.ReasonCategory.MISSED_WIN        -> "Missed Wins"
     }
 
     private fun buildMoveList(

@@ -1,7 +1,6 @@
 package com.acepero13.android.gamereviewer.ui.components
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,7 +37,7 @@ fun MentorPanel(
 ) {
     val insight = state.guidedDiscoveryInsight ?: return
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(modifier = modifier) {
         if (isRecurringPattern) {
             Surface(
                 shape             = RoundedCornerShape(6.dp),
@@ -83,7 +82,7 @@ fun MentorPanel(
             onExit                    = vm::exitMentorMode,
             onToggleMoveInput         = vm::toggleMentorMoveInput,
             onRetryMove               = vm::retryMentorMove,
-            modifier                  = Modifier.fillMaxWidth().weight(1f),
+            modifier                  = Modifier.fillMaxWidth(),
         )
     }
 }
