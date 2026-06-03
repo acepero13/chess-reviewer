@@ -13,9 +13,24 @@ android {
         minSdk          = 26
         targetSdk       = 35
         versionCode     = 1
-        versionName     = "2.5.11-SNAPSHOT"
+        versionName     = "2.5.12"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFile = System.getenv("SIGNING_STORE_FILE")
+            val storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+            val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+            val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            if (storeFile != null && storePassword != null && keyAlias != null && keyPassword != null) {
+                this.storeFile = file(storeFile)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +40,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
