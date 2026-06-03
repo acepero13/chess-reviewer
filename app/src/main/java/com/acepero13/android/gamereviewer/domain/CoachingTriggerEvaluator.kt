@@ -105,6 +105,17 @@ object CoachingTriggerEvaluator {
     private const val COORDINATION_EVAL_MIN_ADVANTAGE_CP = 50
     private const val COORDINATION_BLUNDER_SUPPRESS_CP   = 150
 
+    // EvalCalibration: quiz the user's positional assessment at stable, non-tactical positions.
+    // POST_OPENING window: half-moves 28–44 (≈ move 14–22 per side).
+    // EVAL_JUMP: eval crosses from within the "equal" band into an "advantage" band.
+    private const val CALIBRATION_POST_OPENING_MIN  = 28
+    private const val CALIBRATION_POST_OPENING_MAX  = 44
+    private const val CALIBRATION_EVAL_JUMP_FROM_CP = 50   // inner edge of "equal" zone
+    private const val CALIBRATION_EVAL_JUMP_TO_CP   = 150  // outer edge entering "advantage" zone
+    private const val CALIBRATION_FREQUENCY_CAP     = 15   // minimum half-moves between calibrations
+    private const val CALIBRATION_VOLATILITY_MAX_CP = 50   // avg |evalDelta| over last 3 moves
+    private const val CALIBRATION_MAX_EVAL_CP       = 300  // skip lopsided positions (>3 pawns)
+
     // ── Public API ─────────────────────────────────────────────────────────────
 
     /**
@@ -138,6 +149,10 @@ object CoachingTriggerEvaluator {
         val recentEvalDeltas = ArrayDeque<Int>(10)
         // Sliding window of the last 6 evalCp values — powers the Decisiveness Slope metric
         val recentEvalCps    = ArrayDeque<Int>(6)
+
+        // Calibration frequency cap: tracks the last half-move index where calibration fired.
+        // Initialised far enough in the past so the first eligible position can fire.
+        var lastCalibrationAt = -CALIBRATION_FREQUENCY_CAP * 2
 
         sorted.forEachIndexed { i, eval ->
             val triggers   = mutableListOf<CoachingTrigger>()
@@ -553,6 +568,19 @@ object CoachingTriggerEvaluator {
                 Log.d(TAG, "$pfx ConversionStrategy: SKIP evalFromPlayer=$evalFromPlayer playerTurn=${isWhite == playerIsWhite}")
             }
 
+            // ── EvalCalibration ───────────────────────────────────────────────────
+            // Only fires on the player's own moves so the question is relevant to what they just played.
+            if (isWhite == playerIsWhite) {
+                val prevEval3 = (0 until minOf(3, i)).map { k -> sorted[i - 1 - k] }
+                val calibration = detectCalibration(eval, prevEval3, lastCalibrationAt, pfx)
+                if (calibration != null) {
+                    triggers.add(calibration)
+                    Log.d(TAG, "$pfx EvalCalibration: FIRE context=${calibration.context} evalCp=${calibration.engineEvalCp}")
+                }
+            } else {
+                Log.d(TAG, "$pfx EvalCalibration: SKIP opponent move")
+            }
+
             // ── CctCheck / OpponentPlan mutual exclusion ──────────────────────────
             // Both describe "opponent played well" but CctCheck is the more specific,
             // habit-reinforcing trigger — suppress OpponentPlan when CctCheck fires.
@@ -617,6 +645,12 @@ object CoachingTriggerEvaluator {
 
                 if (triggers.isNotEmpty()) {
                     result[eval.moveIndex] = triggers
+                    // Update calibration frequency cap only when the calibration trigger actually
+                    // survives all filtering (tier + single-voice) so suppressed probes don't
+                    // consume a calibration slot.
+                    if (triggers.any { it is CoachingTrigger.EvalCalibration }) {
+                        lastCalibrationAt = eval.moveIndex
+                    }
                 }
             }
             Log.d(TAG, "$pfx RESULT pre-filter=$preFilterTypes final=${triggers.map { it.typeName() }}")
@@ -1118,6 +1152,77 @@ object CoachingTriggerEvaluator {
      */
     private fun effectiveSubPriority(trigger: CoachingTrigger, weakTypes: Set<String>): Int =
         if (trigger.typeName() in weakTypes) trigger.subPriority() - 5 else trigger.subPriority()
+
+    /**
+     * Calibration trigger: quizzes the user's positional assessment at stable moments.
+     *
+     * Fires when:
+     *  - Position is past the opening gate and not lopsided
+     *  - Recent evaluation is not volatile (no tactical storm)
+     *  - At least [CALIBRATION_FREQUENCY_CAP] half-moves have passed since the last calibration
+     *  - A recognised context exists: POST_OPENING window or a significant evaluation jump
+     *
+     * The returned trigger carries the hidden engine eval; it is only revealed after the user
+     * locks in their own assessment in the UI.
+     */
+    private fun detectCalibration(
+        eval: GameEvaluation,
+        prevEvals: List<GameEvaluation>,    // up to 3 most-recent preceding evaluations
+        lastCalibrationAt: Int,
+        pfx: String = "",
+    ): CoachingTrigger.EvalCalibration? {
+        val moveIndex = eval.moveIndex
+
+        // Opening gate
+        if (moveIndex < TIER4_OPENING_GATE) {
+            Log.d(TAG, "$pfx Calibration: SUPPRESS opening (moveIndex=$moveIndex < $TIER4_OPENING_GATE)")
+            return null
+        }
+
+        // Frequency cap
+        if (moveIndex - lastCalibrationAt < CALIBRATION_FREQUENCY_CAP) {
+            Log.d(TAG, "$pfx Calibration: SUPPRESS frequency cap (lastAt=$lastCalibrationAt gap=${moveIndex - lastCalibrationAt})")
+            return null
+        }
+
+        // Don't quiz in lopsided positions — the student isn't practicing estimation, they're just reading a number
+        if (kotlin.math.abs(eval.evalCp) > CALIBRATION_MAX_EVAL_CP) {
+            Log.d(TAG, "$pfx Calibration: SUPPRESS lopsided evalCp=${eval.evalCp}")
+            return null
+        }
+
+        // Tactical clarity: if the board motif is sharply tactical, it's the wrong moment to pause
+        if (eval.motif in listOf("fork", "hanging", "checkmate")) {
+            Log.d(TAG, "$pfx Calibration: SUPPRESS tactical motif=${eval.motif}")
+            return null
+        }
+
+        // Volatility check: average |evalDelta| over the last 3 half-moves must be low
+        val avgVolatility = if (prevEvals.isEmpty()) 0
+                            else prevEvals.sumOf { kotlin.math.abs(it.evalDelta) } / prevEvals.size
+        if (avgVolatility > CALIBRATION_VOLATILITY_MAX_CP) {
+            Log.d(TAG, "$pfx Calibration: SUPPRESS high volatility avg=$avgVolatility > $CALIBRATION_VOLATILITY_MAX_CP")
+            return null
+        }
+
+        // Determine context
+        val isPostOpening = moveIndex in CALIBRATION_POST_OPENING_MIN..CALIBRATION_POST_OPENING_MAX
+        val prevEvalCp    = prevEvals.firstOrNull()?.evalCp ?: 0
+        val wasInEqualZone  = kotlin.math.abs(prevEvalCp) < CALIBRATION_EVAL_JUMP_FROM_CP
+        val isNowAdvantage  = kotlin.math.abs(eval.evalCp) >= CALIBRATION_EVAL_JUMP_TO_CP
+        val isEvalJump      = wasInEqualZone && isNowAdvantage
+
+        val context = when {
+            isEvalJump    -> CalibrationContext.EVAL_JUMP
+            isPostOpening -> CalibrationContext.POST_OPENING
+            else          -> {
+                Log.d(TAG, "$pfx Calibration: SUPPRESS no context (postOpening=$isPostOpening evalJump=$isEvalJump prevEvalCp=$prevEvalCp evalCp=${eval.evalCp})")
+                return null
+            }
+        }
+
+        return CoachingTrigger.EvalCalibration(moveIndex, eval.evalCp, context)
+    }
 
     // ── Board geometry helpers ─────────────────────────────────────────────────
 

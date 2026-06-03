@@ -382,6 +382,20 @@ data class AnalysisUiState(
     val pivotalMoments: com.acepero13.android.gamereviewer.domain.PivotalMoments? = null,
     /** True while the Pivotal Moments overview panel is shown before the session begins. */
     val showPivotalMomentsPanel: Boolean = false,
+
+    // ── Calibration quiz ─────────────────────────────────────────────────────
+    /** True while the CalibrationPanel is visible to the user. */
+    val showCalibrationPanel: Boolean = false,
+    /** The EvalCalibration trigger driving the current quiz. Null when panel is hidden. */
+    val calibrationTrigger: com.acepero13.android.gamereviewer.domain.CoachingTrigger.EvalCalibration? = null,
+    /** User's current slider selection: -2 (Strong Black) … +2 (Strong White). Starts at 0 (Equal). */
+    val calibrationUserValue: Int = 0,
+    /** True once the user has pressed "Lock In My Assessment". */
+    val calibrationLocked: Boolean = false,
+    /** Feedback text shown after locking in (compares user assessment to engine). */
+    val calibrationFeedback: String = "",
+    /** True when the feedback is positive (user was close to engine eval). */
+    val calibrationFeedbackPositive: Boolean = false,
 )
 
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -785,6 +799,7 @@ class AnalysisViewModel(
                     is CoachingTrigger.CoordinatedAttack   -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, pieceCount=${t.pieceCount}"
                     is CoachingTrigger.PieceHarmony        -> "isPlayerSide=${t.isPlayerSide}, isLoss=${t.isLoss}, score=${t.score}"
                     is CoachingTrigger.PunishBlunder       -> "opponentLoss=${t.opponentLoss}"
+                    is CoachingTrigger.EvalCalibration     -> "engineEvalCp=${t.engineEvalCp}, context=${t.context}"
                 }
                 appendLine("**Trigger properties:** $props")
             }
@@ -959,17 +974,107 @@ class AnalysisViewModel(
     // PUBLIC — Proactive coaching (Board Scan triggers)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /** Opens the ProactiveCoachingPanel for the primary trigger at the current position. */
+    /** Opens the ProactiveCoachingPanel (or CalibrationPanel) for the primary trigger at the current position. */
     fun enterProactiveCoaching() {
         val idx     = _uiState.value.moveIndex
         val trigger = _uiState.value.triggersByMove[idx]?.firstOrNull() ?: return
-        _uiState.update {
-            it.copy(
-                showProactiveCoaching = true,
-                activeProactiveTrigger = trigger,
-                triggersEngaged       = it.triggersEngaged + idx,
+        if (trigger is CoachingTrigger.EvalCalibration) {
+            _uiState.update {
+                it.copy(
+                    showCalibrationPanel   = true,
+                    calibrationTrigger     = trigger,
+                    calibrationUserValue   = 0,
+                    calibrationLocked      = false,
+                    calibrationFeedback    = "",
+                    calibrationFeedbackPositive = false,
+                    triggersEngaged        = it.triggersEngaged + idx,
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    showProactiveCoaching  = true,
+                    activeProactiveTrigger = trigger,
+                    triggersEngaged        = it.triggersEngaged + idx,
+                )
+            }
+        }
+    }
+
+    /** Updates the slider position in the calibration quiz without locking in. */
+    fun onCalibrationValueChange(value: Int) {
+        _uiState.update { it.copy(calibrationUserValue = value.coerceIn(-2, 2)) }
+    }
+
+    /**
+     * Locks in the user's assessment and reveals feedback comparing it to the engine eval.
+     * The engine eval stored in the trigger is never shown raw — only mapped to the same
+     * 5-point scale so the feedback stays in the user's own language.
+     */
+    fun lockInCalibration() {
+        val trigger = _uiState.value.calibrationTrigger ?: return
+        val userValue    = _uiState.value.calibrationUserValue
+        val engineValue  = evalCpToCalibrationValue(trigger.engineEvalCp)
+        val diff         = kotlin.math.abs(userValue - engineValue)
+        val userLabel    = calibrationValueLabel(userValue)
+        val engineLabel  = calibrationValueLabel(engineValue)
+
+        val (feedback, positive) = when (diff) {
+            0 -> Pair(
+                "Spot on. You read the board exactly as the engine does — that kind of positional clarity is a real asset.",
+                true,
+            )
+            1 -> Pair(
+                "Close. You said $userLabel and the engine agrees it's $engineLabel — you're in the right neighbourhood. The difference is a matter of degree, not direction.",
+                true,
+            )
+            2 -> Pair(
+                "You felt it was $userLabel, but the engine evaluates it as $engineLabel. Try to identify what piece or pawn structure difference you might have missed.",
+                false,
+            )
+            else -> Pair(
+                "You felt it was $userLabel, but the engine sees $engineLabel here. This is a gap worth studying — look at the pawn structure and piece activity to see what you underestimated.",
+                false,
             )
         }
+        _uiState.update {
+            it.copy(
+                calibrationLocked           = true,
+                calibrationFeedback         = feedback,
+                calibrationFeedbackPositive = positive,
+            )
+        }
+    }
+
+    /** Closes the calibration panel and resets its state. */
+    fun dismissCalibration() {
+        _uiState.update {
+            it.copy(
+                showCalibrationPanel        = false,
+                calibrationTrigger          = null,
+                calibrationUserValue        = 0,
+                calibrationLocked           = false,
+                calibrationFeedback         = "",
+                calibrationFeedbackPositive = false,
+            )
+        }
+    }
+
+    private fun evalCpToCalibrationValue(evalCp: Int): Int = when {
+        evalCp <= -150 -> -2
+        evalCp <= -50  -> -1
+        evalCp < 50    ->  0
+        evalCp < 150   ->  1
+        else           ->  2
+    }
+
+    private fun calibrationValueLabel(value: Int): String = when (value) {
+        -2 -> "a strong Black advantage"
+        -1 -> "a slight Black advantage"
+         0 -> "equal"
+         1 -> "a slight White advantage"
+         2 -> "a strong White advantage"
+        else -> "unknown"
     }
 
     fun dismissProactiveCoaching() {
@@ -1466,6 +1571,13 @@ class AnalysisViewModel(
                 triggersEngaged               = emptySet(),
                 showReflectionMode            = false,
                 reflectionItems               = emptyList(),
+                // Clear calibration panel
+                showCalibrationPanel          = false,
+                calibrationTrigger            = null,
+                calibrationUserValue          = 0,
+                calibrationLocked             = false,
+                calibrationFeedback           = "",
+                calibrationFeedbackPositive   = false,
             )
         }
         viewModelScope.launch(Dispatchers.Default) { applyMoveIndex(idx) }
@@ -2515,6 +2627,13 @@ class AnalysisViewModel(
                 proactiveHangingSquares     = emptyList(),
                 proactiveHangingOwnSquares  = emptySet(),
                 proactiveFoundSquares       = emptySet(),
+                // Dismiss calibration panel when navigating
+                showCalibrationPanel        = false,
+                calibrationTrigger          = null,
+                calibrationUserValue        = 0,
+                calibrationLocked           = false,
+                calibrationFeedback         = "",
+                calibrationFeedbackPositive = false,
             )
         }
         Log.d(tag, "applyMoveIndex($index): state updated — moveIndex=${_uiState.value.moveIndex} fen=${_uiState.value.boardState.fen.take(40)}")

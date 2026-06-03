@@ -2,6 +2,7 @@ package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -56,6 +57,7 @@ private val ASSESS_DEFAULT    = Color(0xFFB0BEC5)
 fun MoveListTab(
     entries: List<MoveListEntry>,
     modifier: Modifier = Modifier,
+    onMoveClick: (moveIndex: Int) -> Unit = {},
 ) {
     val hScroll = rememberScrollState()
 
@@ -99,7 +101,15 @@ fun MoveListTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(rowBg)
-                    .horizontalScroll(hScroll),
+                    .horizontalScroll(hScroll)
+                    .combinedClickable(
+                        onClick = {},
+                        onDoubleClick = {
+                            val moveIndex = if (entry.blackSan != null) entry.moveNumber * 2
+                                           else entry.moveNumber * 2 - 1
+                            onMoveClick(moveIndex)
+                        },
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DataCell("${entry.moveNumber}", COL_NUM, color = ChessGold, bold = true)

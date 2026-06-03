@@ -521,6 +521,18 @@ object InsightReconciler {
                 "Ask yourself: 'What did they leave behind with that move?' — an undefended piece, an open line, a tactical weakness. " +
                 "The punishment is often straightforward once you stop and look.",
         )
+
+        is CoachingTrigger.EvalCalibration -> Insight(
+            emoji       = "🎯",
+            title       = trigger.title(),
+            description = "Take a moment to read the board with your own eyes — the engine bar will stay hidden until you've committed to your assessment.",
+            questions   = listOf(
+                trigger.coachingQuestion(),
+                "What specific feature of the position led you to that conclusion — piece activity, pawn structure, or king safety?",
+            ),
+            conceptualHint = "Board reading is a skill built by practice, not by checking the eval bar. " +
+                "When you commit to an assessment and then compare it to the engine, any gap tells you exactly which structural features you're not yet seeing instinctively.",
+        )
     }
 
     // ── By motif (Blunder Guard reflection) ───────────────────────────────────

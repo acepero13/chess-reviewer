@@ -145,7 +145,7 @@ fun GameReportScreen(
             ) { tab ->
                 when (tab) {
                     0 -> OverviewTabContent(state, onNavigateToMove)
-                    1 -> MoveListTab(entries = state.moveListEntries)
+                    1 -> MoveListTab(entries = state.moveListEntries, onMoveClick = onNavigateToMove)
                 }
             }
         }

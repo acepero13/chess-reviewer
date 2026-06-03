@@ -109,6 +109,7 @@ import com.acepero13.android.gamereviewer.ui.components.NavigateModeContent
 import com.acepero13.android.gamereviewer.ui.components.OpeningDeviationPanel
 import com.acepero13.android.gamereviewer.ui.components.PositionCoachCard
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
+import com.acepero13.android.gamereviewer.ui.components.CalibrationPanel
 import com.acepero13.android.gamereviewer.ui.components.ProactiveCoachingPanel
 import com.acepero13.android.gamereviewer.ui.components.GameStoryCard
 import com.acepero13.android.gamereviewer.ui.components.PostGameDebrief
@@ -233,6 +234,7 @@ fun AnalysisScreen(
          state.showMiddlegamePlanPanel || state.showEndgameRecognitionPanel)
 
     val hasCoachContent = state.showProactiveCoaching ||
+                          state.showCalibrationPanel  ||
                           state.guidedDiscoveryMode   ||
                           state.reviewMode == ReviewMode.MENTOR ||
                           state.showOpeningDeviationPanel ||
@@ -489,6 +491,22 @@ fun AnalysisScreen(
                         modifier                  = Modifier.fillMaxWidth(),
                     )
                 }
+            }
+
+            // Calibration quiz panel — shown when an EvalCalibration trigger fires
+            state.calibrationTrigger?.let { trigger ->
+                CalibrationPanel(
+                    trigger          = trigger,
+                    visible          = state.showCalibrationPanel,
+                    selectedValue    = state.calibrationUserValue,
+                    locked           = state.calibrationLocked,
+                    feedback         = state.calibrationFeedback,
+                    feedbackPositive = state.calibrationFeedbackPositive,
+                    onValueChange    = vm::onCalibrationValueChange,
+                    onLockIn         = vm::lockInCalibration,
+                    onDismiss        = vm::dismissCalibration,
+                    modifier         = Modifier.fillMaxWidth(),
+                )
             }
 
             // Forcing sequence banner — shown in sandbox explore mode (try / animating / complete)
@@ -937,8 +955,12 @@ private fun AnalysisBottomBar(
                         val recentTriggerTypes = (1..3).mapNotNull { step ->
                             state.triggersByMove[state.moveIndex - step * 2]?.firstOrNull()?.typeName()
                         }.toSet()
+                        // EvalCalibration is always interactive (never repetitive), so exempt it
+                        // from the recency suppression window the same way tier-1 triggers are.
                         val hasActiveTrigger   = currentTrigger != null &&
-                            (currentTrigger.tier() == 1 || currentTriggerType !in recentTriggerTypes)
+                            (currentTrigger.tier() == 1 ||
+                             currentTrigger is CoachingTrigger.EvalCalibration ||
+                             currentTriggerType !in recentTriggerTypes)
                         BottomBarButton(
                             icon            = Icons.Outlined.Lightbulb,
                             label           = "Coach",

@@ -3,6 +3,14 @@ package com.acepero13.android.gamereviewer.domain
 import com.github.bhlangonijr.chesslib.Side
 import com.github.bhlangonijr.chesslib.Square
 
+/** Context that caused an [CoachingTrigger.EvalCalibration] to fire. */
+enum class CalibrationContext {
+    /** Around move 15–20: the opening is over, ask who stands better. */
+    POST_OPENING,
+    /** The engine evaluation just crossed a significance threshold in either direction. */
+    EVAL_JUMP,
+}
+
 /**
  * Represents a proactive coaching moment detected in a game position.
  *
@@ -76,6 +84,17 @@ sealed class CoachingTrigger(val moveIndex: Int) {
     /** Opponent blundered ≥ 150 cp — opportunity to capitalize on their mistake. */
     class PunishBlunder(moveIndex: Int, val opponentLoss: Int) : CoachingTrigger(moveIndex)
 
+    /**
+     * Calibration quiz: asks the user to assess the position independently before seeing the engine bar.
+     * Fires at stable, non-tactical positions to build the habit of reading the board with their own eyes.
+     * The hidden [engineEvalCp] is revealed only after the user locks in their answer.
+     */
+    class EvalCalibration(
+        moveIndex: Int,
+        val engineEvalCp: Int,
+        val context: CalibrationContext,
+    ) : CoachingTrigger(moveIndex)
+
     // ── Identity ───────────────────────────────────────────────────────────────
 
     fun typeName(): String = when (this) {
@@ -95,6 +114,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         is CoordinatedAttack    -> "COORDINATED_ATTACK"
         is PieceHarmony         -> "PIECE_HARMONY"
         is PunishBlunder        -> "PUNISH_BLUNDER"
+        is EvalCalibration      -> "EVAL_CALIBRATION"
     }
 
     fun emoji(): String = when (this) {
@@ -124,6 +144,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             else                     -> "🔓"
         }
         is PunishBlunder       -> "🎯"
+        is EvalCalibration     -> "🎯"
     }
 
     fun title(): String = when (this) {
@@ -153,6 +174,10 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             else                     -> "Opponent Lost Coordination"
         }
         is PunishBlunder       -> "Capitalize on the Mistake"
+        is EvalCalibration     -> when (context) {
+            CalibrationContext.POST_OPENING -> "Who Stands Better?"
+            CalibrationContext.EVAL_JUMP    -> "Did You Feel the Shift?"
+        }
     }
 
     fun coachingQuestion(): String = when (this) {
@@ -210,6 +235,12 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         }
         is PunishBlunder ->
             "Your opponent just played a move that worsens their position. What do you think is the tactical justification for their move — and can you punish their inaccuracy?"
+        is EvalCalibration -> when (context) {
+            CalibrationContext.POST_OPENING ->
+                "The opening phase is over. Based on piece activity and pawn structure — who do you think has the edge right now?"
+            CalibrationContext.EVAL_JUMP ->
+                "Something just shifted in this position. Before you continue — who do you think is better, and why?"
+        }
     }
 
     /**
@@ -230,6 +261,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         is CoordinatedAttack, is PieceHarmony                                   -> 3
         is WorstPiece, is RookActivation, is CandidateMoves, is CandidateSearch -> 4
         is ConversionStrategy                                                    -> 0
+        is EvalCalibration                                                       -> 4
     }
 
     /**
@@ -253,6 +285,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         is RookActivation       -> 13
         is ConversionStrategy   -> 14
         is PunishBlunder        -> 2
+        is EvalCalibration      -> 10
     }
 
     // ── Display label used in Reflection Mode selection lists ─────────────────
@@ -274,6 +307,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
         is CoordinatedAttack    -> "Coordinated Attack"
         is PieceHarmony         -> "Piece Harmony"
         is PunishBlunder        -> "Punish Blunder"
+        is EvalCalibration      -> "Eval Calibration"
     }
 
     companion object {
@@ -282,7 +316,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             "Safety Issue", "Multiple Plans", "Restricted Piece",
             "Forcing Move", "Opponent's Plan", "Pre-Move Check", "Rook Activation",
             "Impulse Move", "Calculation Error", "Tactical Oversight", "Depth Search", "CCT Check", "Conversion Strategy",
-            "Coordinated Attack", "Piece Harmony", "Punish Blunder",
+            "Coordinated Attack", "Piece Harmony", "Punish Blunder", "Eval Calibration",
         )
 
         /** Reconstruct a minimal trigger stub from a stored type name (no geometry data needed). */
@@ -303,6 +337,7 @@ sealed class CoachingTrigger(val moveIndex: Int) {
             "COORDINATED_ATTACK"   -> CoordinatedAttack(moveIndex, isPlayerSide = true, isLoss = false, pieceCount = 0)
             "PIECE_HARMONY"        -> PieceHarmony(moveIndex, isPlayerSide = true, isLoss = false, score = 0)
             "PUNISH_BLUNDER"       -> PunishBlunder(moveIndex, 0)
+            "EVAL_CALIBRATION"     -> EvalCalibration(moveIndex, 0, CalibrationContext.POST_OPENING)
             else                   -> null
         }
     }
