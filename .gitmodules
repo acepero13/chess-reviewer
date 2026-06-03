@@ -1,0 +1,3 @@
+[submodule "chess-core"]
+	path = chess-core
+	url = https://github.com/acepero13/chess-core.git
