@@ -20,7 +20,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
         run: |
-          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"
           git submodule update --init --depth=1
 
       - name: Set up JDK 17
@@ -41,11 +41,19 @@ jobs:
       - name: Decode keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "${{ runner.temp }}/release.jks"
+          keytool -importkeystore \
+            -srckeystore "${{ runner.temp }}/release.jks" \
+            -srcstorepass "${{ secrets.RELEASE_STORE_PASSWORD }}" \
+            -destkeystore "${{ runner.temp }}/release_compat.jks" \
+            -deststorepass "${{ secrets.RELEASE_STORE_PASSWORD }}" \
+            -deststoretype PKCS12 \
+            -J-Dkeystore.pkcs12.legacy \
+            -noprompt 2>&1 | grep -v "^Warning"
 
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon
         env:
-          SIGNING_STORE_FILE: ${{ runner.temp }}/release.jks
+          SIGNING_STORE_FILE: ${{ runner.temp }}/release_compat.jks
           SIGNING_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
