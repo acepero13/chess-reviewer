@@ -46,9 +46,8 @@ jobs:
             -srcstorepass "${{ secrets.RELEASE_STORE_PASSWORD }}" \
             -destkeystore "${{ runner.temp }}/release_compat.jks" \
             -deststorepass "${{ secrets.RELEASE_STORE_PASSWORD }}" \
-            -deststoretype PKCS12 \
-            -J-Dkeystore.pkcs12.legacy \
-            -noprompt 2>&1 | grep -v "^Warning"
+            -deststoretype JKS \
+            -noprompt
 
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon
