@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.domain.GameNarrativeSummary
 import com.acepero13.android.gamereviewer.ui.components.DecisionVelocityChart
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -69,9 +69,10 @@ fun GameReportScreen(
 ) {
     val state by vm.uiState.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
+    val appColors = LocalAppColors.current
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -96,7 +97,7 @@ fun GameReportScreen(
                         Icon(Icons.Outlined.ArrowBackIosNew, "Back", tint = ChessGold)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->
@@ -127,7 +128,7 @@ fun GameReportScreen(
         ) {
             TabRow(
                 selectedTabIndex = selectedTab,
-                containerColor   = WCDark,
+                containerColor   = appColors.background,
                 contentColor     = ChessGold,
             ) {
                 Tab(

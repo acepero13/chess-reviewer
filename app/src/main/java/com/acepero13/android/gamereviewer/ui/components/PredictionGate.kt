@@ -39,7 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.screens.GamePrediction
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
 @Composable
 fun PredictionGate(
@@ -65,12 +65,13 @@ fun PredictionGate(
         ) {
             var selected by remember { mutableStateOf<GamePrediction?>(null) }
 
+            val appColors = LocalAppColors.current
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
                 shape  = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
+                colors = CardDefaults.cardColors(containerColor = appColors.surface),
                 border = BorderStroke(1.dp, ChessGold.copy(alpha = 0.35f)),
             ) {
                 Column(
@@ -124,7 +125,7 @@ fun PredictionGate(
                             Text(
                                 text       = "Start Review",
                                 fontWeight = FontWeight.SemiBold,
-                                color      = WCDark,
+                                color      = appColors.background,
                             )
                         }
                     }
@@ -141,7 +142,8 @@ private fun PredictionOption(
     onClick:    () -> Unit,
     modifier:   Modifier = Modifier,
 ) {
-    val borderColor = if (isSelected) ChessGold else Color(0xFF3A3A3A)
+    val appColors   = LocalAppColors.current
+    val borderColor = if (isSelected) ChessGold else appColors.border
     val bgColor     = if (isSelected) Color(0x1FC9A84C) else Color.Transparent
 
     Row(

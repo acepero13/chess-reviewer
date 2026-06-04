@@ -56,10 +56,9 @@ import com.acepero13.android.gamereviewer.domain.InsightReconciler
 import com.acepero13.android.gamereviewer.ui.screens.CoordinationQuizPhase
 import com.acepero13.chess.core.ui.theme.AnalyzeBlue
 import com.acepero13.chess.core.ui.theme.ChessGold
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
-private val PanelBg     = Color(0xFF1A1A1A)
 private val PanelBorder = Color(0xFF2D6A4F)
-private val PanelText   = Color(0xFFCCE8D9)
 
 private fun CoachingTrigger.supportsSquareAnswer(): Boolean = when (this) {
     is CoachingTrigger.PreMoveChecklist -> true
@@ -120,9 +119,9 @@ fun ProactiveCoachingPanel(
     if (showQuestionsDialog) {
         AlertDialog(
             onDismissRequest  = { showQuestionsDialog = false },
-            containerColor    = Color(0xFF1E1E1E),
-            titleContentColor = PanelText,
-            textContentColor  = PanelText,
+            containerColor    = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor  = MaterialTheme.colorScheme.onSurface,
             title = {
                 Row(
                     verticalAlignment      = Alignment.CenterVertically,
@@ -144,7 +143,7 @@ fun ProactiveCoachingPanel(
                     Text(
                         text  = insight.description,
                         style = MaterialTheme.typography.bodySmall,
-                        color = PanelText.copy(alpha = 0.85f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                     )
 
                     HorizontalDivider(color = PanelBorder.copy(alpha = 0.4f))
@@ -153,7 +152,7 @@ fun ProactiveCoachingPanel(
                     Text(
                         text       = "Think about these:",
                         style      = MaterialTheme.typography.labelSmall,
-                        color      = PanelText.copy(alpha = 0.6f),
+                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         fontWeight = FontWeight.SemiBold,
                     )
                     insight.questions.forEachIndexed { i, question ->
@@ -170,7 +169,7 @@ fun ProactiveCoachingPanel(
                             Text(
                                 text  = question,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = PanelText,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -190,7 +189,7 @@ fun ProactiveCoachingPanel(
                         Text(
                             text      = insight.conceptualHint,
                             style     = MaterialTheme.typography.bodySmall,
-                            color     = PanelText.copy(alpha = 0.65f),
+                            color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                             fontStyle = FontStyle.Italic,
                         )
                     }
@@ -201,7 +200,7 @@ fun ProactiveCoachingPanel(
                         if (savedReflection.isNotEmpty()) {
                             Card(
                                 shape  = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF163B2A)),
+                                colors = CardDefaults.cardColors(containerColor = ChessGold.copy(alpha = 0.10f)),
                                 border = BorderStroke(1.dp, PanelBorder.copy(alpha = 0.5f)),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
@@ -216,7 +215,7 @@ fun ProactiveCoachingPanel(
                                     Text(
                                         text  = savedReflection,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = PanelText,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                     )
                                 }
                             }
@@ -228,7 +227,7 @@ fun ProactiveCoachingPanel(
                             ) {
                                 Text(
                                     text  = "Edit reflection",
-                                    color = PanelText.copy(alpha = 0.7f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -261,7 +260,7 @@ fun ProactiveCoachingPanel(
             },
             dismissButton = {
                 TextButton(onClick = { showQuestionsDialog = false }) {
-                    Text("Back", color = PanelText.copy(alpha = 0.6f))
+                    Text("Back", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
             },
         )
@@ -271,9 +270,9 @@ fun ProactiveCoachingPanel(
     if (showReflectionDialog) {
         AlertDialog(
             onDismissRequest  = { showReflectionDialog = false },
-            containerColor    = Color(0xFF1E1E1E),
-            titleContentColor = PanelText,
-            textContentColor  = PanelText,
+            containerColor    = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor  = MaterialTheme.colorScheme.onSurface,
             title = {
                 Text(
                     text       = "Your Reflection",
@@ -289,7 +288,7 @@ fun ProactiveCoachingPanel(
                         Text(
                             text  = "What are you thinking? Write your plan, candidate moves, or observations…",
                             style = MaterialTheme.typography.bodySmall,
-                            color = PanelText.copy(alpha = 0.4f),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                         )
                     },
                     modifier  = Modifier
@@ -300,8 +299,8 @@ fun ProactiveCoachingPanel(
                     colors    = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = ChessGold,
                         unfocusedBorderColor = PanelBorder,
-                        focusedTextColor     = PanelText,
-                        unfocusedTextColor   = PanelText,
+                        focusedTextColor     = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor   = MaterialTheme.colorScheme.onSurface,
                         cursorColor          = ChessGold,
                     ),
                     shape = RoundedCornerShape(8.dp),
@@ -317,7 +316,7 @@ fun ProactiveCoachingPanel(
             },
             dismissButton = {
                 TextButton(onClick = { showReflectionDialog = false }) {
-                    Text("Cancel", color = PanelText.copy(alpha = 0.6f))
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
             },
         )
@@ -332,7 +331,7 @@ fun ProactiveCoachingPanel(
     ) {
         Card(
             shape  = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = PanelBg),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.dp, PanelBorder),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -372,12 +371,12 @@ fun ProactiveCoachingPanel(
                             text       = insight.title,
                             style      = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color      = PanelText,
+                            color      = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             text     = insight.description,
                             style    = MaterialTheme.typography.bodySmall,
-                            color    = PanelText.copy(alpha = 0.75f),
+                            color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -434,7 +433,7 @@ fun ProactiveCoachingPanel(
                             val feedbackColor = when (proactiveAnswerIsCorrect) {
                                 true  -> Color(0xFF22C55E)
                                 false -> Color(0xFFEF4444)
-                                null  -> PanelText
+                                null  -> MaterialTheme.colorScheme.onSurface
                             }
                             Text(
                                 text       = proactiveAnswerFeedback,
@@ -473,7 +472,7 @@ fun ProactiveCoachingPanel(
                                 Text(
                                     text  = "Watching the forcing sequence…",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = PanelText.copy(alpha = 0.85f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 LinearProgressIndicator(
@@ -485,7 +484,7 @@ fun ProactiveCoachingPanel(
                                 Text(
                                     text  = "Move $forcingSequenceCurrentStep of $forcingSequenceTotalSteps",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = PanelText.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                                 )
                             }
                         }
@@ -522,7 +521,7 @@ fun ProactiveCoachingPanel(
                                     ) {
                                         Text(
                                             text  = "Explore freely",
-                                            color = PanelText.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -534,18 +533,18 @@ fun ProactiveCoachingPanel(
                                 Text(
                                     text      = "You're in sandbox mode. Play what you think is the forcing continuation.",
                                     style     = MaterialTheme.typography.bodySmall,
-                                    color     = PanelText.copy(alpha = 0.85f),
+                                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                     fontStyle = FontStyle.Italic,
                                 )
                                 Button(
                                     onClick  = { onShowForcingSequence?.invoke() },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape    = RoundedCornerShape(8.dp),
-                                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2D2D)),
+                                    colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                                 ) {
                                     Text(
                                         text       = "Give up — show the sequence",
-                                        color      = PanelText.copy(alpha = 0.8f),
+                                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                         style      = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,
                                     )
@@ -588,7 +587,7 @@ fun ProactiveCoachingPanel(
                                     ) {
                                         Text(
                                             text  = "Just show me",
-                                            color = PanelText.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -609,7 +608,7 @@ fun ProactiveCoachingPanel(
                                 Text(
                                     text       = "Playing the best response…",
                                     style      = MaterialTheme.typography.bodySmall,
-                                    color      = PanelText.copy(alpha = 0.85f),
+                                    color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 LinearProgressIndicator(
@@ -653,7 +652,7 @@ fun ProactiveCoachingPanel(
                                     ) {
                                         Text(
                                             text  = "Explore freely",
-                                            color = PanelText.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -665,18 +664,18 @@ fun ProactiveCoachingPanel(
                                 Text(
                                     text      = "You're in sandbox mode. Play what you think punishes the blunder.",
                                     style     = MaterialTheme.typography.bodySmall,
-                                    color     = PanelText.copy(alpha = 0.85f),
+                                    color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                     fontStyle = FontStyle.Italic,
                                 )
                                 Button(
                                     onClick  = { onShowForcingSequence?.invoke() },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape    = RoundedCornerShape(8.dp),
-                                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2D2D)),
+                                    colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                                 ) {
                                     Text(
                                         text       = "Show me the best response",
-                                        color      = PanelText.copy(alpha = 0.8f),
+                                        color      = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                                         style      = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,
                                     )
@@ -719,7 +718,7 @@ fun ProactiveCoachingPanel(
                                     ) {
                                         Text(
                                             text  = "Play the best move",
-                                            color = PanelText.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -737,7 +736,7 @@ fun ProactiveCoachingPanel(
                             Text(
                                 text      = "Can you spot how these pieces are working together? Try to identify the square they're all targeting before I show you.",
                                 style     = MaterialTheme.typography.bodySmall,
-                                color     = PanelText.copy(alpha = 0.85f),
+                                color     = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                                 fontStyle = FontStyle.Italic,
                             )
                             Spacer(Modifier.height(4.dp))
@@ -766,7 +765,7 @@ fun ProactiveCoachingPanel(
                                 ) {
                                     Text(
                                         text  = "Show me",
-                                        color = PanelText.copy(alpha = 0.7f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }

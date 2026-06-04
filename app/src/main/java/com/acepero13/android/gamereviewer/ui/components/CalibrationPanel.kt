@@ -41,13 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.domain.CalibrationContext
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
-private val CalibBg       = Color(0xFF1A1A2E)
-private val CalibBorder   = Color(0xFF4A3F6B)
-private val CalibText     = Color(0xFFCFCBE8)
 private val CalibAccent   = Color(0xFF9B7FD4)
 private val CalibPositive = Color(0xFF2D6A4F)
 private val CalibNegative = Color(0xFF6B3A2A)
+private val CalibBorder   = Color(0xFF4A3F6B)
 
 /** Labels and colours for the 5-point evaluation scale. */
 private data class EvalOption(val value: Int, val shortLabel: String, val fullLabel: String, val tint: Color)
@@ -85,12 +84,13 @@ fun CalibrationPanel(
         exit          = shrinkVertically() + fadeOut(),
         modifier      = modifier,
     ) {
+        val appColors = LocalAppColors.current
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             shape    = RoundedCornerShape(12.dp),
-            colors   = CardDefaults.cardColors(containerColor = CalibBg),
+            colors   = CardDefaults.cardColors(containerColor = appColors.surface),
             border   = BorderStroke(1.dp, CalibBorder),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -120,7 +120,7 @@ fun CalibrationPanel(
                         Icon(
                             imageVector = Icons.Outlined.Close,
                             contentDescription = "Dismiss",
-                            tint = CalibText.copy(alpha = 0.6f),
+                            tint = appColors.textTertiary,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -140,7 +140,7 @@ fun CalibrationPanel(
                         Column {
                             Text(
                                 text     = trigger.coachingQuestion(),
-                                color    = CalibText,
+                                color    = appColors.textPrimary,
                                 fontSize = 13.sp,
                                 lineHeight = 18.sp,
                             )
@@ -164,7 +164,7 @@ fun CalibrationPanel(
                                         ),
                                         colors   = ButtonDefaults.outlinedButtonColors(
                                             containerColor = if (isSelected) option.tint.copy(alpha = 0.18f) else Color.Transparent,
-                                            contentColor   = if (isSelected) option.tint else CalibText.copy(alpha = 0.6f),
+                                            contentColor   = if (isSelected) option.tint else appColors.textTertiary,
                                         ),
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 6.dp),
                                     ) {
@@ -215,7 +215,7 @@ fun CalibrationPanel(
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     text       = "You said: ${selectedOption?.fullLabel ?: ""}",
-                                    color      = selectedOption?.tint ?: CalibText,
+                                    color      = selectedOption?.tint ?: appColors.textPrimary,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize   = 13.sp,
                                 )
@@ -232,7 +232,7 @@ fun CalibrationPanel(
                             ) {
                                 Text(
                                     text      = feedback,
-                                    color     = CalibText,
+                                    color     = appColors.textPrimary,
                                     fontSize  = 12.sp,
                                     lineHeight = 17.sp,
                                     fontStyle = FontStyle.Italic,
@@ -247,7 +247,7 @@ fun CalibrationPanel(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors   = ButtonDefaults.buttonColors(
                                     containerColor = CalibBorder,
-                                    contentColor   = CalibText,
+                                    contentColor   = Color.White,
                                 ),
                                 shape    = RoundedCornerShape(8.dp),
                             ) {

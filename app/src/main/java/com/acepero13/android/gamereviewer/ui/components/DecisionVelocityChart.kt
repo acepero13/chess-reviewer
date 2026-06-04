@@ -84,9 +84,10 @@ fun DecisionVelocityChart(
         val colWidth   = 28.dp
         val totalWidth = colWidth * decisions.size + 52.dp  // + left axis area
 
-        val density     = LocalDensity.current
-        val colWidthPx  = with(density) { colWidth.toPx() }
-        val padLeftPx   = with(density) { 44.dp.toPx() }
+        val density            = LocalDensity.current
+        val colWidthPx         = with(density) { colWidth.toPx() }
+        val padLeftPx          = with(density) { 44.dp.toPx() }
+        val onSurfaceVariant   = MaterialTheme.colorScheme.onSurfaceVariant
 
         Box(
             modifier = Modifier
@@ -133,7 +134,7 @@ fun DecisionVelocityChart(
 
                     // faint horizontal rule
                     drawLine(
-                        color       = Color.White.copy(alpha = if (cp == 0f) 0.20f else 0.08f),
+                        color       = onSurfaceVariant.copy(alpha = if (cp == 0f) 0.30f else 0.12f),
                         start       = Offset(padLeft, y),
                         end         = Offset(size.width, y),
                         strokeWidth = 1.dp.toPx(),
@@ -148,7 +149,7 @@ fun DecisionVelocityChart(
                             x = padLeft - measured.size.width - 4.dp.toPx(),
                             y = y - measured.size.height / 2f,
                         ),
-                        color = Color.White.copy(alpha = 0.55f),
+                        color = onSurfaceVariant.copy(alpha = 0.75f),
                     )
                 }
 
@@ -158,7 +159,7 @@ fun DecisionVelocityChart(
                 drawText(
                     textLayoutResult = axisTitleMeasured,
                     topLeft = Offset(x = 2.dp.toPx(), y = padTop),
-                    color   = Color.White.copy(alpha = 0.4f),
+                    color   = onSurfaceVariant.copy(alpha = 0.55f),
                 )
 
                 // ── Eval area fill ───────────────────────────────────────────
@@ -174,7 +175,7 @@ fun DecisionVelocityChart(
                 val lastX = padLeft + (decisions.size - 1) * colW + colW / 2f
                 evalPath.lineTo(lastX, padTop + drawH)
                 evalPath.close()
-                drawPath(path = evalPath, color = Color.White.copy(alpha = 0.12f))
+                drawPath(path = evalPath, color = onSurfaceVariant.copy(alpha = 0.15f))
 
                 // ── Eval area outline ────────────────────────────────────────
                 val linePath = Path()
@@ -186,7 +187,7 @@ fun DecisionVelocityChart(
                 }
                 drawPath(
                     path        = linePath,
-                    color       = Color.White.copy(alpha = 0.35f),
+                    color       = onSurfaceVariant.copy(alpha = 0.45f),
                     style       = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round),
                 )
 
@@ -221,7 +222,7 @@ fun DecisionVelocityChart(
                                 x = x - measured.size.width / 2f,
                                 y = size.height - padBottom + 4.dp.toPx(),
                             ),
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = onSurfaceVariant.copy(alpha = 0.65f),
                         )
                     }
                 }

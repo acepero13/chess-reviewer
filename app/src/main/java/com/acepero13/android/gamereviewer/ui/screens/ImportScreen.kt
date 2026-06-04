@@ -50,7 +50,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -58,20 +57,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.CorrectGreen
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import com.acepero13.chess.core.ui.theme.WrongRed
 import org.koin.androidx.compose.koinViewModel
-
-// ── Design tokens ─────────────────────────────────────────────────────────────
-private val CardSurface       = Color(0xFF1A1A1A)
-private val CardBorder        = Color(0xFF2A2A2A)
-private val FieldBorderFocused   = ChessGold
-private val FieldBorderUnfocused = Color(0xFF3A3A3A)
-private val TextPrimary       = Color(0xFFF0F0F0)
-private val TextSecondary     = Color(0xFF888888)
-private val ButtonText        = Color(0xFF1A1A1A)
-private val SuccessBg         = Color(0xFF0D2A0D)
-private val ErrorBg           = Color(0xFF2A0D0D)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,6 +69,7 @@ fun ImportScreen(
 ) {
     val state   by vm.uiState.collectAsState()
     val context = LocalContext.current
+    val appColors = LocalAppColors.current
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -91,7 +80,7 @@ fun ImportScreen(
     var lichessUsername  by remember { mutableStateOf("") }
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -102,7 +91,7 @@ fun ImportScreen(
                         Icon(Icons.Outlined.ArrowBackIosNew, "Back", tint = ChessGold)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->
@@ -166,7 +155,7 @@ fun ImportScreen(
             if (state.isImporting) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors   = CardDefaults.cardColors(containerColor = CardSurface),
+                    colors   = CardDefaults.cardColors(containerColor = appColors.surface),
                     shape    = RoundedCornerShape(10.dp),
                     border   = BorderStroke(1.dp, ChessGold.copy(alpha = 0.3f)),
                 ) {
@@ -179,7 +168,7 @@ fun ImportScreen(
                             Text(
                                 text  = state.currentGame,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
+                                color = appColors.textSecondary,
                             )
                         }
                         if (state.totalGames > 0) {
@@ -187,12 +176,12 @@ fun ImportScreen(
                                 progress   = { state.importedCount.toFloat() / state.totalGames },
                                 modifier   = Modifier.fillMaxWidth(),
                                 color      = ChessGold,
-                                trackColor = CardBorder,
+                                trackColor = appColors.border,
                             )
                             Text(
                                 text  = "${state.importedCount} / ${state.totalGames} games",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextPrimary,
+                                color = appColors.textPrimary,
                             )
                         } else {
                             CircularProgressIndicator(
@@ -209,7 +198,7 @@ fun ImportScreen(
             if (state.done) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors   = CardDefaults.cardColors(containerColor = SuccessBg),
+                    colors   = CardDefaults.cardColors(containerColor = CorrectGreen.copy(alpha = 0.12f)),
                     shape    = RoundedCornerShape(10.dp),
                     border   = BorderStroke(1.dp, CorrectGreen.copy(alpha = 0.4f)),
                 ) {
@@ -246,7 +235,7 @@ fun ImportScreen(
             if (err != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors   = CardDefaults.cardColors(containerColor = ErrorBg),
+                    colors   = CardDefaults.cardColors(containerColor = WrongRed.copy(alpha = 0.12f)),
                     shape    = RoundedCornerShape(10.dp),
                     border   = BorderStroke(1.dp, WrongRed.copy(alpha = 0.4f)),
                 ) {
@@ -283,11 +272,12 @@ private fun ImportSection(
     icon:    ImageVector,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val appColors = LocalAppColors.current
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(containerColor = CardSurface),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(12.dp),
-        border   = BorderStroke(1.dp, CardBorder),
+        border   = BorderStroke(1.dp, appColors.border),
     ) {
         Column(
             modifier            = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -324,6 +314,7 @@ private fun StyledTextField(
     imeAction:     ImeAction = ImeAction.Done,
     onImeAction:   () -> Unit = {},
 ) {
+    val appColors = LocalAppColors.current
     OutlinedTextField(
         value         = value,
         onValueChange = onValueChange,
@@ -332,12 +323,12 @@ private fun StyledTextField(
         modifier      = Modifier.fillMaxWidth(),
         shape         = RoundedCornerShape(8.dp),
         colors        = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor   = FieldBorderFocused,
-            unfocusedBorderColor = FieldBorderUnfocused,
+            focusedBorderColor   = ChessGold,
+            unfocusedBorderColor = appColors.border,
             focusedLabelColor    = ChessGold,
-            unfocusedLabelColor  = TextSecondary,
-            focusedTextColor     = TextPrimary,
-            unfocusedTextColor   = TextPrimary,
+            unfocusedLabelColor  = appColors.textSecondary,
+            focusedTextColor     = appColors.textPrimary,
+            unfocusedTextColor   = appColors.textPrimary,
             cursorColor          = ChessGold,
         ),
         keyboardOptions = KeyboardOptions(imeAction = imeAction),
@@ -355,6 +346,7 @@ private fun GoldButton(
     enabled:  Boolean   = true,
     icon:     ImageVector? = null,
 ) {
+    val appColors = LocalAppColors.current
     Button(
         onClick  = onClick,
         enabled  = enabled,
@@ -362,9 +354,9 @@ private fun GoldButton(
         shape    = RoundedCornerShape(8.dp),
         colors   = ButtonDefaults.buttonColors(
             containerColor         = ChessGold,
-            contentColor           = ButtonText,
-            disabledContainerColor = Color(0xFF3A3A3A),
-            disabledContentColor   = TextSecondary,
+            contentColor           = appColors.background,
+            disabledContainerColor = appColors.surfaceVariant,
+            disabledContentColor   = appColors.textSecondary,
         ),
     ) {
         if (icon != null) {

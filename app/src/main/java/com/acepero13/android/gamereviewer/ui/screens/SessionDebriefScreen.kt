@@ -42,12 +42,10 @@ import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.domain.SessionDebrief
 import com.acepero13.android.gamereviewer.domain.TimeAnalyzer
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
 
-private val SurfaceCard = Color(0xFF1A1A1A)
 private val GreenAccent = Color(0xFF2D6A4F)
-private val TextOnCard  = Color(0xFFCCE8D9)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,9 +55,10 @@ fun SessionDebriefScreen(
     vm: SessionDebriefViewModel = koinViewModel(),
 ) {
     val state by vm.uiState.collectAsState()
+    val appColors = LocalAppColors.current
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -82,7 +81,7 @@ fun SessionDebriefScreen(
                         Icon(Icons.Outlined.ArrowBackIosNew, "Back", tint = ChessGold)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->
@@ -178,9 +177,10 @@ fun SessionDebriefScreen(
 
 @Composable
 private fun SessionHeaderCard(summary: SessionDebrief.Summary) {
+    val appColors  = LocalAppColors.current
     val gamesLabel = if (summary.gameCount == 1) "1 game" else "${summary.gameCount} games"
     Card(
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors = CardDefaults.cardColors(containerColor = appColors.surface),
         shape  = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, ChessGold.copy(alpha = 0.3f)),
         modifier = Modifier.fillMaxWidth(),
@@ -200,7 +200,7 @@ private fun SessionHeaderCard(summary: SessionDebrief.Summary) {
                 Text(
                     "$gamesLabel reviewed",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextOnCard.copy(alpha = 0.7f),
+                    color = appColors.textSecondary,
                 )
             }
             Text("📋", style = MaterialTheme.typography.headlineMedium)
@@ -210,8 +210,9 @@ private fun SessionHeaderCard(summary: SessionDebrief.Summary) {
 
 @Composable
 private fun TimePatternCard(summary: SessionDebrief.Summary) {
+    val appColors = LocalAppColors.current
     Card(
-        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -247,13 +248,13 @@ private fun TimePatternCard(summary: SessionDebrief.Summary) {
             }
 
             if (summary.totalBlunders > 0) {
-                HorizontalDivider(color = GreenAccent.copy(alpha = 0.3f))
+                HorizontalDivider(color = appColors.border)
                 val impulseRate = if (summary.totalBlunders > 0)
                     (summary.rushedBlunders * 100) / summary.totalBlunders else 0
                 Text(
                     text  = "$impulseRate% of blunders were impulsive (played under ${TimeAnalyzer.FAST_MOVE_SECONDS}s)",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextOnCard.copy(alpha = 0.75f),
+                    color = appColors.textSecondary,
                 )
             }
         }
@@ -262,8 +263,9 @@ private fun TimePatternCard(summary: SessionDebrief.Summary) {
 
 @Composable
 private fun WeaknessCard(emoji: String, title: String, count: Int) {
+    val appColors = LocalAppColors.current
     Card(
-        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -277,7 +279,7 @@ private fun WeaknessCard(emoji: String, title: String, count: Int) {
                 Text(
                     "Top Session Weakness",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextOnCard.copy(alpha = 0.55f),
+                    color = appColors.textTertiary,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
@@ -289,7 +291,7 @@ private fun WeaknessCard(emoji: String, title: String, count: Int) {
                 Text(
                     "Occurred $count time${if (count == 1) "" else "s"} in this session",
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextOnCard.copy(alpha = 0.65f),
+                    color = appColors.textSecondary,
                 )
             }
         }
@@ -298,12 +300,13 @@ private fun WeaknessCard(emoji: String, title: String, count: Int) {
 
 @Composable
 private fun CoachMessageCard(message: String) {
+    val appColors = LocalAppColors.current
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF163B2A),
+            containerColor = ChessGold.copy(alpha = 0.10f),
         ),
         shape  = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, GreenAccent),
+        border = BorderStroke(1.dp, ChessGold.copy(alpha = 0.35f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -319,7 +322,7 @@ private fun CoachMessageCard(message: String) {
             Text(
                 text      = message,
                 style     = MaterialTheme.typography.bodySmall,
-                color     = TextOnCard,
+                color     = appColors.textPrimary,
                 fontStyle = FontStyle.Italic,
             )
         }
@@ -328,8 +331,9 @@ private fun CoachMessageCard(message: String) {
 
 @Composable
 private fun DrillCtaCard(drillTitle: String, onStart: () -> Unit) {
+    val appColors = LocalAppColors.current
     Card(
-        colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -346,7 +350,7 @@ private fun DrillCtaCard(drillTitle: String, onStart: () -> Unit) {
             Text(
                 "Recommended drill based on today's patterns:",
                 style = MaterialTheme.typography.bodySmall,
-                color = TextOnCard.copy(alpha = 0.65f),
+                color = appColors.textSecondary,
             )
             Button(
                 onClick  = onStart,
@@ -371,6 +375,7 @@ private fun DrillCtaCard(drillTitle: String, onStart: () -> Unit) {
 
 @Composable
 private fun DebriefStat(value: String, label: String, highlight: Boolean = false) {
+    val appColors = LocalAppColors.current
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text       = value,
@@ -381,7 +386,7 @@ private fun DebriefStat(value: String, label: String, highlight: Boolean = false
         Text(
             text      = label,
             style     = MaterialTheme.typography.labelSmall,
-            color     = TextOnCard.copy(alpha = 0.65f),
+            color     = appColors.textSecondary,
         )
     }
 }

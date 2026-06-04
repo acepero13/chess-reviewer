@@ -51,9 +51,7 @@ import com.acepero13.android.gamereviewer.data.model.PlayerStats
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.engine.highlights.GameHighlight
 import com.acepero13.chess.core.ui.theme.ChessGold
-
-private val SurfaceDim = Color(0xFF1A1A1A)
-private val ColDivider = Color(0xFF2D2D2D)
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
 /**
  * Bottom sheet showing game stats and collapsible highlights list.
@@ -68,12 +66,13 @@ fun StatsSheet(
     onNavigate:  (moveIndex: Int) -> Unit,
     modifier:    Modifier = Modifier,
 ) {
+    val appColors  = LocalAppColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     ModalBottomSheet(
         onDismissRequest  = onDismiss,
         sheetState        = sheetState,
-        containerColor    = SurfaceDim,
+        containerColor    = appColors.surface,
         modifier          = modifier,
     ) {
         LazyColumn(
@@ -159,7 +158,7 @@ fun StatsSheet(
             // ── Highlights (collapsible) ─────────────────────────────────────
             item {
                 Spacer(Modifier.height(4.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(color = appColors.border)
                 Spacer(Modifier.height(4.dp))
                 HighlightsSection(
                     highlights = highlights,
@@ -197,7 +196,7 @@ private fun PlayerStatsColumns(white: PlayerStats, black: PlayerStats) {
                 modifier  = Modifier
                     .fillMaxHeight()
                     .padding(horizontal = 8.dp),
-                color     = ColDivider,
+                color     = MaterialTheme.colorScheme.outlineVariant,
                 thickness = 1.dp,
             )
 
@@ -209,7 +208,7 @@ private fun PlayerStatsColumns(white: PlayerStats, black: PlayerStats) {
 @Composable
 private fun PlayerColumn(stats: PlayerStats, modifier: Modifier = Modifier) {
     val sideLabel = if (stats.isWhite) "White" else "Black"
-    val sideColor = if (stats.isWhite) Color.White else Color(0xFFBBBBBB)
+    val sideColor = MaterialTheme.colorScheme.onSurface
 
     Column(
         modifier            = modifier,
@@ -245,7 +244,7 @@ private fun PlayerColumn(stats: PlayerStats, modifier: Modifier = Modifier) {
             }
         }
 
-        HorizontalDivider(color = ColDivider)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         // Stats grid
         StatItem(label = "Accuracy",        value = "${"%.1f".format(stats.accuracy)}%")

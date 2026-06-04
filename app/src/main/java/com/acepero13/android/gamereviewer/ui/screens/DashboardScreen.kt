@@ -49,7 +49,7 @@ import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
 import com.acepero13.android.gamereviewer.ui.components.PhaseBreakdownCard
 import com.acepero13.android.gamereviewer.ui.components.TopCoachTriggerCard
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
 
 /**
@@ -73,9 +73,10 @@ fun DashboardScreen(
     vm:           DashboardViewModel = koinViewModel(),
 ) {
     val state by vm.uiState.collectAsState()
+    val appColors = LocalAppColors.current
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -96,7 +97,7 @@ fun DashboardScreen(
                         Icon(Icons.Outlined.Refresh, "Refresh", tint = ChessGold)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->

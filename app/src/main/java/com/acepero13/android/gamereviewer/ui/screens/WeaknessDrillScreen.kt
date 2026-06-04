@@ -42,13 +42,11 @@ import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.GuidedDiscoveryPanel
 import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
-private val BannerBg     = Color(0xFF1E1600)
 private val BannerBorder = Color(0xFFC9A84C)
-private val BannerText   = Color(0xFFE8C882)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,9 +57,10 @@ fun WeaknessDrillScreen(
     vm: WeaknessDrillViewModel = koinViewModel(parameters = { parametersOf(categoryNames) }),
 ) {
     val state by vm.uiState.collectAsState()
+    val appColors = LocalAppColors.current
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -90,7 +89,7 @@ fun WeaknessDrillScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->
@@ -215,12 +214,13 @@ private fun DrillContextBanner(
     moveIndex: Int,
     modifier:  Modifier = Modifier,
 ) {
+    val appColors     = LocalAppColors.current
     val fullMoveNum   = (moveIndex + 1) / 2
     val side          = if (moveIndex % 2 == 1) "White" else "Black"
     Card(
         modifier = modifier,
         shape    = RoundedCornerShape(8.dp),
-        colors   = CardDefaults.cardColors(containerColor = BannerBg),
+        colors   = CardDefaults.cardColors(containerColor = ChessGold.copy(alpha = 0.10f)),
         border   = androidx.compose.foundation.BorderStroke(1.dp, BannerBorder),
     ) {
         Row(
@@ -231,12 +231,12 @@ private fun DrillContextBanner(
             Text(
                 gameLabel,
                 style  = MaterialTheme.typography.labelMedium,
-                color  = BannerText,
+                color  = appColors.textPrimary,
             )
             Text(
                 "Move $fullMoveNum — Find the best for $side",
                 style  = MaterialTheme.typography.labelSmall,
-                color  = BannerText.copy(alpha = 0.8f),
+                color  = appColors.textSecondary,
             )
         }
     }
@@ -278,7 +278,7 @@ private fun DrillCompleteCard(
                 onClick = onBack,
                 colors  = ButtonDefaults.buttonColors(containerColor = ChessGold),
             ) {
-                Text("Back to Dashboard", color = Color.Black, fontWeight = FontWeight.SemiBold)
+                Text("Back to Dashboard", fontWeight = FontWeight.SemiBold)
             }
         }
     }

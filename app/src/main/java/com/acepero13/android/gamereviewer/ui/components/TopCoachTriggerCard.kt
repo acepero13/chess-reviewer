@@ -27,10 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.ui.screens.TopCoachTrigger
 import com.acepero13.chess.core.ui.theme.ChessGold
-
-private val CardBg     = Color(0xFF1A1A1A)
-private val CardBorder = Color(0xFF3A3000)   // subtle gold tint to distinguish from other cards
-private val BodyText   = Color(0xFFCCCCCC)
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
 private val TIER_LABEL = mapOf(
     0 to "Tactical",
@@ -70,6 +67,7 @@ fun TopCoachTriggerCard(
     trigger:  TopCoachTrigger,
     modifier: Modifier = Modifier,
 ) {
+    val appColors = LocalAppColors.current
     val progress = (trigger.streak.toFloat() / TriggerMasteryRepository.MASTERY_THRESHOLD)
         .coerceIn(0f, 1f)
     val tierLabel = TIER_LABEL[trigger.tier] ?: "Positional"
@@ -78,8 +76,8 @@ fun TopCoachTriggerCard(
 
     Card(
         shape    = RoundedCornerShape(12.dp),
-        colors   = CardDefaults.cardColors(containerColor = CardBg),
-        border   = BorderStroke(1.dp, CardBorder),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
+        border   = BorderStroke(1.dp, ChessGold.copy(alpha = 0.25f)),
         modifier = modifier,
     ) {
         Column(
@@ -110,7 +108,7 @@ fun TopCoachTriggerCard(
                         Text(
                             text  = "·  ${trigger.label}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = BodyText.copy(alpha = 0.5f),
+                            color = appColors.textTertiary,
                         )
                     }
                 }
@@ -120,7 +118,7 @@ fun TopCoachTriggerCard(
             Text(
                 text  = tip,
                 style = MaterialTheme.typography.bodySmall,
-                color = BodyText.copy(alpha = 0.75f),
+                color = appColors.textSecondary,
             )
 
             // ── Mastery progress ───────────────────────────────────────────────
@@ -133,7 +131,7 @@ fun TopCoachTriggerCard(
                     Text(
                         text  = "Mastery streak",
                         style = MaterialTheme.typography.labelSmall,
-                        color = BodyText.copy(alpha = 0.5f),
+                        color = appColors.textTertiary,
                     )
                     Text(
                         text       = "${trigger.streak} / ${TriggerMasteryRepository.MASTERY_THRESHOLD} correct in a row",
@@ -155,7 +153,7 @@ fun TopCoachTriggerCard(
             Text(
                 text  = "Build this streak in Reflection Mode — the Coach Lamp goes silent once you master it.",
                 style = MaterialTheme.typography.labelSmall,
-                color = BodyText.copy(alpha = 0.4f),
+                color = appColors.textTertiary,
             )
         }
     }

@@ -63,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.LocalAppColors
-import com.acepero13.chess.core.ui.theme.WCDark
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 
@@ -86,7 +85,7 @@ fun GameListScreen(
     val scope    = rememberCoroutineScope()
 
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         snackbarHost   = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
@@ -111,7 +110,7 @@ fun GameListScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
             )
         },
     ) { padding ->

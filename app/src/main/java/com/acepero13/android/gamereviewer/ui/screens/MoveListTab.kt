@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
 private val COL_NUM      = 36.dp
 private val COL_MOVE     = 64.dp
@@ -37,9 +37,6 @@ private val COL_BEST     = 64.dp
 private val COL_TOP3     = 56.dp
 private val COL_DEPTH    = 52.dp
 
-private val HEADER_BG    = Color(0xFF1A1A2E)
-private val ROW_ODD_BG   = Color(0xFF16213E)
-private val ROW_EVEN_BG  = WCDark
 private val BLUNDER_BG   = Color(0x33EF5350)
 private val MISTAKE_BG   = Color(0x22FF9800)
 private val SELECTED_BG  = Color(0x33448AFF)
@@ -59,6 +56,7 @@ fun MoveListTab(
     modifier: Modifier = Modifier,
     onMoveClick: (moveIndex: Int) -> Unit = {},
 ) {
+    val appColors = LocalAppColors.current
     val hScroll = rememberScrollState()
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
@@ -67,7 +65,7 @@ fun MoveListTab(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(HEADER_BG)
+                    .background(appColors.surfaceVariant)
                     .horizontalScroll(hScroll),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -94,7 +92,7 @@ fun MoveListTab(
             val rowBg = when {
                 worstCpl > 100 -> BLUNDER_BG
                 worstCpl > 50  -> MISTAKE_BG
-                else           -> if (index % 2 == 0) ROW_EVEN_BG else ROW_ODD_BG
+                else           -> if (index % 2 == 0) appColors.background else appColors.surface
             }
 
             Row(

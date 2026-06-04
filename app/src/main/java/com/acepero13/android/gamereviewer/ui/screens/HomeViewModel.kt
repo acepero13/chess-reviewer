@@ -2,6 +2,7 @@ package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.SessionDebrief
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,4 +17,8 @@ class HomeViewModel(repo: GameRepository) : ViewModel() {
     val hasRecentSession = repo.countRecentGames(SessionDebrief.sessionCutoff())
         .map { it > 0 }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val recentGames: kotlinx.coroutines.flow.StateFlow<List<ReviewGame>> = repo.observeAll()
+        .map { it.take(6) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }

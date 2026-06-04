@@ -118,21 +118,15 @@ import com.acepero13.android.gamereviewer.ui.components.StatsSheet
 import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.components.EvalBar
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.WCDark
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 // ── Design tokens ────────────────────────────────────────────────────────────
-private val BottomBarSurface = Color(0xFF1A1A1A)
-private val BottomBarDivider = Color(0xFF2D2D2D)
 private val BtnActive        = ChessGold
-private val BtnInactive      = Color(0xFF888888)
-private val BtnDisabled      = Color(0xFF3A3A3A)
 private val BtnSelectedBg    = Color(0x1FC9A84C)   // ChessGold @ 12% alpha
-private val BannerBg         = Color(0xFF1E1600)   // Dark amber
 private val BannerBorder     = Color(0xFFC9A84C)   // ChessGold solid
-private val BannerText       = Color(0xFFE8C882)   // Light amber
 
 /**
  * Main game review screen — three-mode design.
@@ -248,8 +242,10 @@ fun AnalysisScreen(
         label         = "boardFraction",
     )
 
+    val appColors = LocalAppColors.current
+
     Scaffold(
-        containerColor = WCDark,
+        containerColor = appColors.background,
         snackbarHost   = { SnackbarHost(snackbar) },
         floatingActionButton = {
             if (devPanelActive) {
@@ -307,7 +303,7 @@ fun AnalysisScreen(
                         Icon(Icons.Outlined.ArrowBackIosNew, "Back", tint = ChessGold)
                     }
                 },
-                colors  = TopAppBarDefaults.topAppBarColors(containerColor = WCDark),
+                colors  = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
                 actions = {
                     if (state.reviewMode == ReviewMode.MENTOR) {
                         Icon(
@@ -652,7 +648,7 @@ fun AnalysisScreen(
                                             )
                                         }
                                     }
-                                    HorizontalDivider(color = BottomBarDivider, thickness = 1.dp)
+                                    HorizontalDivider(color = appColors.border, thickness = 1.dp)
                                     if (state.mentorSessionQueue.isNotEmpty()) {
                                         val weaknessDotPositions: Set<Int> = run {
                                             val matchingIndices = state.weaknessContext
@@ -706,9 +702,7 @@ fun AnalysisScreen(
 // Board Scan Reflection Mode panel
 // ═══════════════════════════════════════════════════════════════════════════════
 
-private val ReflectionBg     = Color(0xFF111A15)
 private val ReflectionBorder = Color(0xFF2D6A4F)
-private val ReflectionText   = Color(0xFFCCE8D9)
 private val CorrectGreen     = Color(0xFF4CAF50)
 private val WrongAmber       = Color(0xFFF0A500)
 
@@ -729,6 +723,7 @@ private fun BoardScanReflectionPanel(
     val answered = items.count { it.userAnswer != null }
     val correct  = items.count { it.userAnswer == it.correctLabel }
 
+    val appColors = LocalAppColors.current
     Column(
         modifier            = modifier.padding(horizontal = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -737,12 +732,12 @@ private fun BoardScanReflectionPanel(
             text       = "Board Scan Review",
             style      = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color      = ReflectionText,
+            color      = appColors.textPrimary,
         )
         Text(
             text  = "You navigated past these patterns. Can you name each one?",
             style = MaterialTheme.typography.bodySmall,
-            color = ReflectionText.copy(alpha = 0.7f),
+            color = appColors.textSecondary,
         )
         HorizontalDivider(color = ReflectionBorder.copy(alpha = 0.4f))
 
@@ -787,9 +782,10 @@ private fun ReflectionItemCard(
     item:     ReflectionItem,
     onAnswer: (String) -> Unit,
 ) {
+    val appColors = LocalAppColors.current
     Card(
         shape  = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = ReflectionBg),
+        colors = CardDefaults.cardColors(containerColor = appColors.surface),
         border = BorderStroke(1.dp, ReflectionBorder),
     ) {
         Column(
@@ -800,7 +796,7 @@ private fun ReflectionItemCard(
                 text       = "Move ${(item.moveIndex + 1) / 2} — what coaching pattern was here?",
                 style      = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color      = ReflectionText,
+                color      = appColors.textPrimary,
             )
             if (item.userAnswer == null) {
                 REFLECTION_LABELS.chunked(2).forEach { row ->
@@ -818,7 +814,7 @@ private fun ReflectionItemCard(
                                 Text(
                                     text  = label,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = ReflectionText,
+                                    color = appColors.textPrimary,
                                 )
                             }
                         }
@@ -838,7 +834,7 @@ private fun ReflectionItemCard(
                     Text(
                         text  = "— you said: ${item.userAnswer}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = ReflectionText.copy(alpha = 0.7f),
+                        color = appColors.textSecondary,
                     )
                 }
                 if (!isCorrect) {
@@ -875,10 +871,11 @@ private fun AnalysisBottomBar(
     snackbar: SnackbarHostState,
     scope:    kotlinx.coroutines.CoroutineScope,
 ) {
-    Surface(color = BottomBarSurface, tonalElevation = 0.dp) {
+    val appColors = LocalAppColors.current
+    Surface(color = appColors.surface, tonalElevation = 0.dp) {
         Column(modifier = Modifier.animateContentSize(tween(200))) {
             // Top separator — Lichess signature thin rule
-            HorizontalDivider(color = BottomBarDivider, thickness = 0.5.dp)
+            HorizontalDivider(color = appColors.border, thickness = 0.5.dp)
 
             AnimatedContent(
                 targetState    = state.reviewMode,
@@ -1076,10 +1073,11 @@ private fun BottomBarButton(
     selected:        Boolean = false,
     onDisabledClick: (() -> Unit)? = null,
 ) {
+    val appColors = LocalAppColors.current
     val color = when {
-        !enabled -> BtnDisabled
+        !enabled -> appColors.textDisabled
         selected -> BtnActive
-        else     -> BtnInactive
+        else     -> appColors.iconSubtle
     }
 
     Column(
@@ -1250,9 +1248,10 @@ private fun BoardWithBlunderFlash(
  */
 @Composable
 private fun MentorContextBanner(label: String) {
+    val appColors = LocalAppColors.current
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(containerColor = BannerBg),
+        colors   = CardDefaults.cardColors(containerColor = ChessGold.copy(alpha = 0.10f)),
         shape    = RoundedCornerShape(8.dp),
         border   = BorderStroke(1.dp, BannerBorder.copy(alpha = 0.5f)),
     ) {
@@ -1270,7 +1269,7 @@ private fun MentorContextBanner(label: String) {
             Text(
                 text  = label,
                 style = MaterialTheme.typography.bodySmall,
-                color = BannerText,
+                color = appColors.textPrimary,
             )
         }
     }
@@ -1293,6 +1292,7 @@ private fun MissedMomentBanner(
     onReview:  () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val appColors = LocalAppColors.current
     AnimatedVisibility(
         visible = visible,
         enter   = fadeIn() + slideInVertically { -it },
@@ -1300,7 +1300,7 @@ private fun MissedMomentBanner(
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors   = CardDefaults.cardColors(containerColor = BannerBg),
+            colors   = CardDefaults.cardColors(containerColor = ChessGold.copy(alpha = 0.10f)),
             shape    = RoundedCornerShape(8.dp),
             border   = BorderStroke(1.dp, BannerBorder.copy(alpha = 0.5f)),
         ) {
@@ -1318,7 +1318,7 @@ private fun MissedMomentBanner(
                 Text(
                     text     = "Review suggestion available",
                     style    = MaterialTheme.typography.bodySmall,
-                    color    = BannerText,
+                    color    = appColors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onReview) {
@@ -1336,7 +1336,7 @@ private fun MissedMomentBanner(
                     Icon(
                         imageVector        = Icons.Outlined.Close,
                         contentDescription = "Dismiss",
-                        tint               = BtnInactive,
+                        tint               = appColors.iconSubtle,
                         modifier           = Modifier.size(16.dp),
                     )
                 }

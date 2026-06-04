@@ -25,10 +25,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.screens.PhaseBreakdown
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
-private val CardBg          = Color(0xFF1A1A1A)
-private val CardBorder      = Color(0xFF2A2A2A)
-private val RowText         = Color(0xFFCCCCCC)
 private val OpeningColor    = Color(0xFF4FC3F7)
 private val MiddlegameColor = Color(0xFFFFB74D)
 private val EndgameColor    = Color(0xFFEF9A9A)
@@ -45,10 +43,11 @@ fun PhaseBreakdownCard(
     breakdown: PhaseBreakdown,
     modifier:  Modifier = Modifier,
 ) {
+    val appColors = LocalAppColors.current
     Card(
         shape    = RoundedCornerShape(12.dp),
-        colors   = CardDefaults.cardColors(containerColor = CardBg),
-        border   = BorderStroke(1.dp, CardBorder),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
+        border   = BorderStroke(1.dp, appColors.border),
         modifier = modifier,
     ) {
         Column(
@@ -59,7 +58,7 @@ fun PhaseBreakdownCard(
                 text  = "Where in the game do your critical mistakes occur? " +
                     "The longest bar is your highest-risk phase.",
                 style = MaterialTheme.typography.bodySmall,
-                color = RowText.copy(alpha = 0.6f),
+                color = appColors.textTertiary,
             )
 
             PhaseRow(
@@ -95,6 +94,7 @@ private fun PhaseRow(
     color: Color,
     total: Int,
 ) {
+    val appColors = LocalAppColors.current
     val animatedFrac by animateFloatAsState(
         targetValue   = frac,
         animationSpec = tween(durationMillis = 700),
@@ -110,7 +110,7 @@ private fun PhaseRow(
         Text(
             text     = label,
             style    = MaterialTheme.typography.bodySmall,
-            color    = RowText,
+            color    = appColors.textSecondary,
             modifier = Modifier.width(82.dp),
         )
         LinearProgressIndicator(

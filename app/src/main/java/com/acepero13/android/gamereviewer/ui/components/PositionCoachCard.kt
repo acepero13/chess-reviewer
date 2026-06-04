@@ -31,10 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.engine.highlights.GameHighlight
 import com.acepero13.chess.core.ui.theme.ChessGold
-
-private val CardBg     = Color(0xFF1A1A2E)
-private val CardBorder = Color(0xFF3B4A6B)
-private val CardText   = Color(0xFFCDD5F0)
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
 private data class PhaseQuestions(val phase: String, val emoji: String, val questions: List<String>)
 
@@ -85,6 +82,7 @@ fun PositionCoachCard(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val appColors = LocalAppColors.current
     val pq = phaseQuestionsFor(moveIndex)
 
     AnimatedVisibility(
@@ -95,8 +93,8 @@ fun PositionCoachCard(
     ) {
         Card(
             shape  = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = CardBg),
-            border = BorderStroke(1.dp, CardBorder),
+            colors = CardDefaults.cardColors(containerColor = appColors.surface),
+            border = BorderStroke(1.dp, appColors.border),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
@@ -119,19 +117,19 @@ fun PositionCoachCard(
                         Text(
                             text  = "${highlight.title}: ${highlight.description}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = CardText.copy(alpha = 0.65f),
+                            color = appColors.textTertiary,
                         )
                     }
                 }
 
-                HorizontalDivider(color = CardBorder.copy(alpha = 0.5f))
+                HorizontalDivider(color = appColors.border)
 
                 // ── Questions ──────────────────────────────────────────────────
                 Text(
                     text       = "Before you continue, consider:",
                     style      = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color      = CardText.copy(alpha = 0.7f),
+                    color      = appColors.textSecondary,
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     pq.questions.forEachIndexed { i, q ->
@@ -149,7 +147,7 @@ fun PositionCoachCard(
                             Text(
                                 text  = q,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = CardText,
+                                color = appColors.textPrimary,
                             )
                         }
                     }
@@ -162,7 +160,7 @@ fun PositionCoachCard(
                     onClick  = onDismiss,
                     modifier = Modifier.fillMaxWidth(),
                     shape    = RoundedCornerShape(8.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = CardBorder),
+                    colors   = ButtonDefaults.buttonColors(containerColor = ChessGold),
                 ) {
                     Text(
                         text       = "Continue reviewing",

@@ -50,6 +50,7 @@ fun AppNavHost() {
                 onOpenDashboard  = { navController.navigate(Screen.Dashboard.route) },
                 onOpenSettings   = { navController.navigate(Screen.Settings.route) },
                 onOpenDebrief    = { navController.navigate(Screen.SessionDebrief.route) },
+                onOpenAnalysis   = { gameId -> navController.navigate(Screen.Analysis.route(gameId)) },
             )
         }
         composable(Screen.GameList.route) {

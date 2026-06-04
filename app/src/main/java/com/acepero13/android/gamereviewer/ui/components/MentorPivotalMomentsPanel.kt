@@ -28,10 +28,9 @@ import com.acepero13.android.gamereviewer.domain.PivotalMoment
 import com.acepero13.android.gamereviewer.domain.PivotalMomentRole
 import com.acepero13.android.gamereviewer.domain.PivotalMoments
 import com.acepero13.chess.core.ui.theme.ChessGold
+import com.acepero13.chess.core.ui.theme.LocalAppColors
 
-private val PanelBg     = Color(0xFF0D1B14)
 private val PanelBorder = Color(0xFF2A5C3F)
-private val LabelColor  = Color(0xFFCCE8D9)
 
 private val RoleAccent = mapOf(
     PivotalMomentRole.TURNING_POINT      to Color(0xFF4FC3F7),  // blue
@@ -46,6 +45,7 @@ fun MentorPivotalMomentsPanel(
     onSkip:   () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val appColors = LocalAppColors.current
     Column(
         modifier = modifier.padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -61,10 +61,10 @@ fun MentorPivotalMomentsPanel(
         Text(
             text  = "Three moments that shaped this game. Review each to understand what happened.",
             style = MaterialTheme.typography.bodySmall,
-            color = LabelColor.copy(alpha = 0.7f),
+            color = appColors.textSecondary,
         )
 
-        HorizontalDivider(color = PanelBorder.copy(alpha = 0.5f))
+        HorizontalDivider(color = appColors.border)
 
         moments.all.forEach { moment ->
             PivotalMomentCard(
@@ -78,11 +78,11 @@ fun MentorPivotalMomentsPanel(
             Text(
                 text  = "Not enough analyzed data to identify pivotal moments yet.",
                 style = MaterialTheme.typography.bodySmall,
-                color = LabelColor.copy(alpha = 0.6f),
+                color = appColors.textTertiary,
             )
         }
 
-        HorizontalDivider(color = PanelBorder.copy(alpha = 0.5f))
+        HorizontalDivider(color = appColors.border)
 
         OutlinedButton(
             onClick  = onSkip,
@@ -108,12 +108,13 @@ private fun PivotalMomentCard(
     onReview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val appColors = LocalAppColors.current
     val accent = RoleAccent[moment.role] ?: ChessGold
 
     Card(
         modifier = modifier,
         shape    = RoundedCornerShape(10.dp),
-        colors   = CardDefaults.cardColors(containerColor = PanelBg),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         border   = BorderStroke(1.dp, accent.copy(alpha = 0.4f)),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -138,7 +139,7 @@ private fun PivotalMomentCard(
             Text(
                 text  = moment.role.tagline,
                 style = MaterialTheme.typography.bodySmall,
-                color = LabelColor.copy(alpha = 0.6f),
+                color = appColors.textTertiary,
             )
 
             Spacer(Modifier.height(6.dp))
@@ -153,12 +154,12 @@ private fun PivotalMomentCard(
                         text       = "Move ${moment.fullMoveNumber}. (${moment.sideLabel})",
                         style      = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Medium,
-                        color      = LabelColor,
+                        color      = appColors.textPrimary,
                     )
                     Text(
                         text  = buildMomentSubtitle(moment),
                         style = MaterialTheme.typography.labelSmall,
-                        color = LabelColor.copy(alpha = 0.55f),
+                        color = appColors.textTertiary,
                     )
                 }
                 Spacer(Modifier.width(8.dp))
