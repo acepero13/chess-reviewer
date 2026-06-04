@@ -16,17 +16,6 @@ jobs:
           submodules: false
           token: ${{ secrets.SUBMODULE_TOKEN || github.token }}
 
-      - name: Check submodule token
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "ERROR: SUBMODULE_TOKEN is empty or not set"
-            exit 1
-          else
-            echo "SUBMODULE_TOKEN is set (${#TOKEN} chars)"
-          fi
-        env:
-          TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-
       - name: Initialize submodules
         env:
           TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
