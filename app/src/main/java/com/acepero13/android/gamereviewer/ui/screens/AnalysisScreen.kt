@@ -594,6 +594,7 @@ fun AnalysisScreen(
                             entries        = state.treeItems,
                             onNodeClick    = vm::onMoveNodeClick,
                             currentComment = state.currentComment,
+                            isOverthougt   = state.overthougtMoveIndices.contains(state.moveIndex),
                             modifier       = Modifier.fillMaxWidth().weight(1f),
                         )
                     }

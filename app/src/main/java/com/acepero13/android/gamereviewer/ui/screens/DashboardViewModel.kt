@@ -4,11 +4,29 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.EndgameEncounterDao
+import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
+import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
+import com.acepero13.android.gamereviewer.domain.ColorAsymmetryAnalyzer
+import com.acepero13.android.gamereviewer.domain.ColorAsymmetry
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
+import com.acepero13.android.gamereviewer.domain.ImprovementTrajectory
+import com.acepero13.android.gamereviewer.domain.ImprovementTrajectoryAnalyzer
+import com.acepero13.android.gamereviewer.domain.PhaseFailureHeatmap
+import com.acepero13.android.gamereviewer.domain.PhaseFailureRow
+import com.acepero13.android.gamereviewer.domain.SelfAwarenessTrend
+import com.acepero13.android.gamereviewer.domain.SelfAwarenessTrendPoint
+import com.acepero13.android.gamereviewer.domain.VelocityConsistency
+import com.acepero13.android.gamereviewer.domain.VelocityConsistencyAnalyzer
+import com.acepero13.android.gamereviewer.ui.components.EcoDeviationRow
+import com.acepero13.chess.core.opening.OpeningClassifier
+import com.github.bhlangonijr.chesslib.Board
+import com.github.bhlangonijr.chesslib.Square
+import com.github.bhlangonijr.chesslib.move.Move
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,8 +54,8 @@ data class EndgameWeaknessRow(
 
 /** The single coaching habit the user should focus on next. */
 data class TopCoachTrigger(
-    val label:    String,  // display label, e.g. "Forcing Move"
-    val typeName: String,  // e.g. "FORCING_MOVE"
+    val label:    String,
+    val typeName: String,
     val streak:   Int,
     val emoji:    String,
     val title:    String,
@@ -64,17 +82,24 @@ data class DashboardUiState(
     val endgameWeaknesses: List<EndgameWeaknessRow> = emptyList(),
     val phaseBreakdown: PhaseBreakdown? = null,
     val topCoachTrigger: TopCoachTrigger? = null,
+
+    // ── New insight fields ──────────────────────────────────────────────────────
+    val selfAwarenessTrend: List<SelfAwarenessTrendPoint> = emptyList(),
+    val colorAsymmetry: ColorAsymmetry? = null,
+    val phaseFailureHeatmap: List<PhaseFailureRow> = emptyList(),
+    val velocityConsistency: VelocityConsistency? = null,
+    val improvementTrajectory: ImprovementTrajectory? = null,
+    val openingDeviationRows: List<EcoDeviationRow> = emptyList(),
+
     val error: String? = null,
 )
 
 /**
  * Backs the cross-game behavioural diagnosis dashboard (Task 4.3).
  *
- * Loads all [com.acepero13.android.gamereviewer.data.model.CriticalMoment] records,
- * runs [BehavioralDiagnostic.diagnose], and exposes the top 3 failure trends.
+ * Loads all [CriticalMoment] records, runs [BehavioralDiagnostic.diagnose],
+ * and exposes the top 3 failure trends plus all new cross-game insights.
  */
-// Classifies a moment into one of three phases.
-// Explicit reason categories take priority; move index is the fallback.
 private fun CriticalMoment.gamePhase(): String = when (toReason()) {
     CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "opening"
     CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "endgame"
@@ -90,6 +115,9 @@ class DashboardViewModel(
     private val criticalMomentDao: CriticalMomentDao,
     private val masteryRepo: TriggerMasteryRepository,
     private val endgameEncounterDao: EndgameEncounterDao,
+    private val settingsRepo: SettingsRepository,
+    private val moveTimeDao: MoveTimeDao,
+    private val openingClassifier: OpeningClassifier,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -106,8 +134,11 @@ class DashboardViewModel(
                 val totalGames    = repo.count()
                 val gamesAnalyzed = criticalMomentDao.countGamesAnalyzed()
                 val allMoments    = criticalMomentDao.getAll()
-                val trends        = BehavioralDiagnostic.diagnose(allMoments, topN = 3)
-                val wishful       = BehavioralDiagnostic.hasWishfulThinking(allMoments)
+                val allGames      = repo.getAll()
+                val username      = settingsRepo.username.first().trim()
+
+                val trends  = BehavioralDiagnostic.diagnose(allMoments, topN = 3)
+                val wishful = BehavioralDiagnostic.hasWishfulThinking(allMoments)
 
                 val streaks   = masteryRepo.streaks.first()
                 val habitRows = CoachingTrigger.ALL_LABELS.map { label ->
@@ -121,7 +152,6 @@ class DashboardViewModel(
                     )
                 }
 
-                // Lowest streak among non-mastered, with tier as tiebreaker (tier 1 = most critical).
                 val topCoachTrigger = habitRows
                     .filter { !it.mastered }
                     .mapNotNull { row ->
@@ -164,6 +194,31 @@ class DashboardViewModel(
                     .sortedByDescending { it.gamesWithMistake }
                     .take(3)
 
+                // ── New insight computations ────────────────────────────────────
+
+                val selfAwarenessTrend = SelfAwarenessTrend.compute(allMoments, allGames)
+
+                val colorAsymmetry = ColorAsymmetryAnalyzer.compute(allMoments, allGames, username)
+                    .takeIf { it.hasData }
+
+                val phaseHeatmap = PhaseFailureHeatmap.compute(allMoments)
+
+                val allMoveTimes = moveTimeDao.getAll()
+                val timesByGame  = allMoveTimes.groupBy { it.gameId }
+                val velocityConsistency = VelocityConsistencyAnalyzer.compute(timesByGame)
+
+                val improvementTrajectory = trends.firstOrNull()?.let { topTrend ->
+                    ImprovementTrajectoryAnalyzer.compute(allMoments, allGames, topTrend)
+                }
+
+                val deviationRows = computeOpeningDeviationRows(allGames
+                    .filter { game ->
+                        allMoments.any { it.gameId == game.id &&
+                            it.type == com.acepero13.android.gamereviewer.data.model.CriticalMoment.Type.ENGINE_MARKED.name }
+                    }
+                    .take(30) // cap to avoid slowness on large libraries
+                )
+
                 _uiState.update {
                     it.copy(
                         isLoading              = false,
@@ -176,11 +231,68 @@ class DashboardViewModel(
                         endgameWeaknesses      = endgameWeaknesses,
                         phaseBreakdown         = phaseBreakdown,
                         topCoachTrigger        = topCoachTrigger,
+                        selfAwarenessTrend     = selfAwarenessTrend,
+                        colorAsymmetry         = colorAsymmetry,
+                        phaseFailureHeatmap    = phaseHeatmap,
+                        velocityConsistency    = velocityConsistency,
+                        improvementTrajectory  = improvementTrajectory,
+                        openingDeviationRows   = deviationRows,
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
+    }
+
+    /**
+     * Walks each game's UCI moves through the opening classifier to find the first
+     * position not in the ECO database (= the deviation move). Groups by ECO code
+     * and returns the average deviation move for the most-played openings.
+     *
+     * Uses only the stored openingEco; games without a classification are skipped.
+     */
+    private fun computeOpeningDeviationRows(
+        games: List<com.acepero13.android.gamereviewer.data.model.ReviewGame>,
+    ): List<EcoDeviationRow> {
+        data class GameDeviation(val eco: String, val name: String, val deviationMove: Int)
+
+        val deviations = games.mapNotNull { game ->
+            if (game.openingEco.isBlank()) return@mapNotNull null
+            val uciMoves = game.movesUci.split(" ").filter { it.isNotBlank() }
+            if (uciMoves.isEmpty()) return@mapNotNull null
+            val devMove = findDeviationMove(uciMoves)
+            GameDeviation(game.openingEco, game.openingName, devMove)
+        }
+
+        return deviations
+            .groupBy { it.eco }
+            .map { (eco, list) ->
+                EcoDeviationRow(
+                    eco              = eco,
+                    openingName      = list.first().name.take(28),
+                    avgDeviationMove = list.map { it.deviationMove }.average().toFloat(),
+                    gameCount        = list.size,
+                    maxDeviationMove = 20,
+                )
+            }
+            .filter { it.gameCount >= 2 }
+            .sortedByDescending { it.gameCount }
+            .take(5)
+    }
+
+    private fun findDeviationMove(uciMoves: List<String>): Int {
+        return runCatching {
+            val board = Board()
+            for ((index, uci) in uciMoves.withIndex()) {
+                if (uci.length < 4) break
+                val from = Square.valueOf(uci.substring(0, 2).uppercase())
+                val to   = Square.valueOf(uci.substring(2, 4).uppercase())
+                val move = Move(from, to)
+                board.doMove(move)
+                if (openingClassifier.classify(board.fen) == null) return index + 1
+            }
+            uciMoves.size
+        }.getOrElse { uciMoves.size / 2 }
     }
 }

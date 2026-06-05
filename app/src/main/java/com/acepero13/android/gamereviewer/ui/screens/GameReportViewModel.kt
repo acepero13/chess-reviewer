@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
+import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
@@ -12,6 +13,8 @@ import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.domain.GameNarrativeSummary
 import com.acepero13.android.gamereviewer.domain.TimeAnalyzer
+import com.acepero13.android.gamereviewer.domain.VelocityConsistency
+import com.acepero13.android.gamereviewer.domain.VelocityConsistencyAnalyzer
 import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.opening.OpeningClassifier
 import com.acepero13.chess.core.util.ChessUtils
@@ -99,6 +102,16 @@ data class GameReportUiState(
     val selfAwareness: SelfAwarenessData? = null,
     val bestMoments: List<BestMomentData> = emptyList(),
 
+    // ── New insight fields ──────────────────────────────────────────────────────
+    /** Move indices where the player over-calculated but still blundered. */
+    val overthougtMoveIndices: Set<Int> = emptySet(),
+    /**
+     * Fraction of engine-critical positions where the player wrote candidate moves
+     * in the questionnaire. Null when no engine analysis exists for this game.
+     */
+    val candidateEngagementRate: Float? = null,
+    val velocityConsistency: VelocityConsistency? = null,
+
     val error: String? = null,
 )
 
@@ -114,6 +127,7 @@ class GameReportViewModel(
     private val evalDao: GameEvaluationDao,
     private val moveTimeDao: MoveTimeDao,
     private val criticalMomentDao: CriticalMomentDao,
+    private val annotationDao: PositionAnnotationDao,
     private val settingsRepo: SettingsRepository,
     private val openingClassifier: OpeningClassifier,
 ) : ViewModel() {
@@ -144,6 +158,9 @@ class GameReportViewModel(
                 val mistakeReasons = computeMistakeReasons(moments)
                 val selfAwareness  = computeSelfAwareness(moments)
                 val bestMoments    = computeBestMoments(moveList, evals)
+                val overthougt     = TimeAnalyzer.overthougtMoveIndices(decisions)
+                val candidateEngagement = computeCandidateEngagement(moments)
+                val velocityConsistency = VelocityConsistencyAnalyzer.compute(mapOf(gameId to times))
 
                 _uiState.update {
                     it.copy(
@@ -158,14 +175,17 @@ class GameReportViewModel(
                         carefulBlunders = TimeAnalyzer.countCarefulBlunders(decisions),
                         avgTimeOnBlunders  = TimeAnalyzer.avgTimeOnBlunders(decisions),
                         avgTimeOnGoodMoves = TimeAnalyzer.avgTimeOnGoodMoves(decisions),
-                        hasTimeData       = times.isNotEmpty(),
-                        narrative         = narrative,
-                        moveListEntries   = moveList,
-                        moveQualityCounts = moveQuality,
-                        phaseAccuracy     = phaseAccuracy,
-                        mistakeReasons    = mistakeReasons,
-                        selfAwareness     = selfAwareness,
-                        bestMoments       = bestMoments,
+                        hasTimeData         = times.isNotEmpty(),
+                        narrative           = narrative,
+                        moveListEntries     = moveList,
+                        moveQualityCounts   = moveQuality,
+                        phaseAccuracy       = phaseAccuracy,
+                        mistakeReasons      = mistakeReasons,
+                        selfAwareness       = selfAwareness,
+                        bestMoments         = bestMoments,
+                        overthougtMoveIndices    = overthougt,
+                        candidateEngagementRate  = candidateEngagement,
+                        velocityConsistency      = velocityConsistency,
                     )
                 }
             } catch (e: Exception) {
@@ -261,6 +281,25 @@ class GameReportViewModel(
             }
         }
         return candidates.sortedBy { it.prevAbsEval }.map { it.data }.take(3)
+    }
+
+    /**
+     * Computes the fraction of engine-critical positions where the player wrote
+     * candidate moves in the self-analysis questionnaire.
+     *
+     * The questionnaire stores responses as markdown in [PositionAnnotation.moveComment]
+     * with the line prefix `**Candidates:**`. A position is counted as "engaged" when
+     * its annotation contains this prefix.
+     */
+    private suspend fun computeCandidateEngagement(moments: List<CriticalMoment>): Float? {
+        val engineMoments = moments.filter { it.toType() == CriticalMoment.Type.ENGINE_MARKED }
+        if (engineMoments.isEmpty()) return null
+        val withCandidates = engineMoments.count { m ->
+            if (m.fen.isBlank()) return@count false
+            val annot = runCatching { annotationDao.getByFen(m.fen) }.getOrNull()
+            annot?.moveComment?.contains("**Candidates:**") == true
+        }
+        return withCandidates.toFloat() / engineMoments.size
     }
 
     private fun reasonLabel(reason: CriticalMoment.ReasonCategory) = when (reason) {

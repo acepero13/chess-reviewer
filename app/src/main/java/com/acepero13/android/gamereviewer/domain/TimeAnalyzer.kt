@@ -134,4 +134,23 @@ object TimeAnalyzer {
         val good = decisions.filter { !it.isBlunder }
         return if (good.isEmpty()) 0f else good.map { it.timeSpentSeconds }.average().toFloat()
     }
+
+    /**
+     * Move indices (1-based) where the player spent a long time calculating but
+     * still produced a blunder — the classic "overthought" failure mode.
+     * These positions are candidates for Blunder Guard reflection prompts.
+     */
+    fun overthougtMoveIndices(decisions: List<MoveDecision>): Set<Int> =
+        decisions
+            .filter { it.decisionType == DecisionType.CAREFUL_BLUNDER }
+            .map { it.moveIndex }
+            .toSet()
+
+    /** Population standard deviation of time-per-move for a single game's decisions. */
+    fun timeStdDev(decisions: List<MoveDecision>): Float {
+        if (decisions.size < 2) return 0f
+        val times = decisions.map { it.timeSpentSeconds.toFloat() }
+        val mean  = times.average().toFloat()
+        return kotlin.math.sqrt(times.map { (it - mean) * (it - mean) }.average().toFloat())
+    }
 }

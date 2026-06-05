@@ -20,6 +20,8 @@ class GameRepository(private val dao: ReviewGameDao) {
 
     suspend fun count(): Int = dao.count()
 
+    suspend fun getAll(): List<ReviewGame> = dao.getAll()
+
     suspend fun isDuplicate(sourceType: String, sourceId: String): Boolean =
         dao.findBySourceId(sourceType, sourceId) != null
 

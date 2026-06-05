@@ -75,7 +75,10 @@ fun DecisionVelocityChart(
             modifier = Modifier.padding(bottom = 2.dp),
         )
         Text(
-            text     = "Y-axis: centipawn loss per move (higher = worse). Dot colour shows time vs. quality.",
+            text     = "Each dot is one move. The higher it sits, the bigger the mistake (spikes = blunders). " +
+                       "The colour shows how you spent your time: red = you played fast and it backfired; " +
+                       "purple = you thought long but still went wrong; orange = quick move that turned out fine; " +
+                       "teal = careful and correct. A cluster of tall red spikes means you're rushing in critical moments.",
             style    = MaterialTheme.typography.labelSmall,
             color    = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 6.dp),

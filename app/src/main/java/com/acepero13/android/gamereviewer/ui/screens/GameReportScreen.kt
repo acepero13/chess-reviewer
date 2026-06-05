@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.domain.GameNarrativeSummary
 import com.acepero13.android.gamereviewer.ui.components.DecisionVelocityChart
+import com.acepero13.android.gamereviewer.ui.components.VelocityConsistencyCard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
@@ -171,8 +172,23 @@ private fun OverviewTabContent(
         // ── Narrative summary ─────────────────────────────────────────────
         state.narrative?.let { NarrativeSummaryCard(it) }
 
-        // ── Self-awareness score ───────────────────────────────────────────
-        state.selfAwareness?.takeIf { it.total > 0 }?.let { SelfAwarenessCard(it) }
+        // ── Self-awareness + threat recognition gap ────────────────────────
+        state.selfAwareness?.takeIf { it.total > 0 }?.let {
+            SelfAwarenessCard(it)
+            ThreatRecognitionGapCard(it)
+        }
+
+        // ── Candidate engagement ───────────────────────────────────────────
+        state.candidateEngagementRate?.let { CandidateEngagementCard(it) }
+
+        // ── Overthought positions ──────────────────────────────────────────
+        if (state.overthougtMoveIndices.isNotEmpty() && state.hasTimeData) {
+            OverthougtCard(
+                count      = state.overthougtMoveIndices.size,
+                moveIndices = state.overthougtMoveIndices.sorted(),
+                onMoveClick = onNavigateToMove,
+            )
+        }
 
         // ── Move quality distribution ──────────────────────────────────────
         if (state.moveQualityCounts.isNotEmpty()) {
@@ -205,6 +221,14 @@ private fun OverviewTabContent(
                     modifier = Modifier.padding(16.dp),
                 )
             }
+        }
+
+        // ── Velocity consistency (pacing spread for this game) ────────────
+        state.velocityConsistency?.let {
+            VelocityConsistencyCard(
+                consistency = it,
+                modifier    = Modifier.fillMaxWidth(),
+            )
         }
 
         // ── Summary stats ─────────────────────────────────────────────────
@@ -739,6 +763,156 @@ private fun BestMomentsCard(moments: List<BestMomentData>) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+        }
+    }
+}
+
+// ── New insight composables ────────────────────────────────────────────────────
+
+@Composable
+private fun ThreatRecognitionGapCard(selfAwareness: SelfAwarenessData) {
+    val gapPct = ((1f - selfAwareness.score) * 100).toInt()
+    if (gapPct == 0) return
+
+    val gapColor = when {
+        gapPct < 30 -> Color(0xFF4CAF50)
+        gapPct < 60 -> Color(0xFFFF9800)
+        else         -> Color(0xFFE53935)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = gapColor.copy(alpha = 0.1f),
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Threat Recognition Gap",
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = gapColor,
+                )
+                Text(
+                    "$gapPct%",
+                    style      = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color      = gapColor,
+                )
+            }
+            Text(
+                "You missed ${selfAwareness.total - selfAwareness.noticed} of ${selfAwareness.total} " +
+                    "critical positions the engine flagged. Work on feeling when a position demands attention.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CandidateEngagementCard(rate: Float) {
+    val pct      = (rate * 100).toInt()
+    val color    = when {
+        pct >= 70 -> Color(0xFF4CAF50)
+        pct >= 40 -> Color(0xFFFF9800)
+        else       -> Color(0xFFE53935)
+    }
+    val verdict  = when {
+        pct >= 70 -> "Strong engagement"
+        pct >= 40 -> "Partial engagement"
+        else       -> "Low engagement"
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape  = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            modifier          = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "Candidate Analysis",
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = ChessGold,
+                )
+                Text(
+                    "$verdict — you wrote candidate moves at $pct% of critical positions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                "$pct%",
+                style      = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color      = color,
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverthougtCard(
+    count:       Int,
+    moveIndices: List<Int>,
+    onMoveClick: (Int) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFFF9800).copy(alpha = 0.12f),
+        ),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Overthought Blunders",
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = Color(0xFFFF9800),
+                )
+                Text(
+                    "$count",
+                    style      = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color      = Color(0xFFFF9800),
+                )
+            }
+            Text(
+                "Moves where you spent ≥${com.acepero13.android.gamereviewer.domain.TimeAnalyzer.SLOW_MOVE_SECONDS}s calculating but still blundered — " +
+                    "your calculation process found the wrong candidate. Consider using a structured candidate elimination checklist.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            )
+            if (moveIndices.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier              = Modifier.fillMaxWidth(),
+                ) {
+                    moveIndices.take(6).forEach { idx ->
+                        val moveNum = (idx + 1) / 2
+                        val side    = if (idx % 2 == 1) "W" else "B"
+                        androidx.compose.material3.AssistChip(
+                            onClick = { onMoveClick(idx) },
+                            label   = { Text("$moveNum$side", style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
                 }
             }
         }

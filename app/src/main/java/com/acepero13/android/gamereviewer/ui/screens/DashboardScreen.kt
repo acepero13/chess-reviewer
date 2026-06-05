@@ -45,9 +45,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.BehavioralProfileCard
+import com.acepero13.android.gamereviewer.ui.components.ColorAsymmetryCard
 import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
+import com.acepero13.android.gamereviewer.ui.components.ImprovementTrajectoryCard
+import com.acepero13.android.gamereviewer.ui.components.OpeningDeviationConvergenceCard
 import com.acepero13.android.gamereviewer.ui.components.PhaseBreakdownCard
+import com.acepero13.android.gamereviewer.ui.components.PhaseFailureHeatmapCard
+import com.acepero13.android.gamereviewer.ui.components.SelfAwarenessTrendCard
 import com.acepero13.android.gamereviewer.ui.components.TopCoachTriggerCard
+import com.acepero13.android.gamereviewer.ui.components.VelocityConsistencyCard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
@@ -225,6 +231,68 @@ fun DashboardScreen(
                         style    = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(16.dp),
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // ── Self-awareness trend ───────────────────────────────────────────
+            if (state.selfAwarenessTrend.size >= 2) {
+                CollapsibleSection(title = "Self-Awareness Trend") {
+                    SelfAwarenessTrendCard(
+                        points   = state.selfAwarenessTrend,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // ── Color asymmetry ────────────────────────────────────────────────
+            state.colorAsymmetry?.let { asymmetry ->
+                if (asymmetry.hasData) {
+                    CollapsibleSection(title = "Color Asymmetry") {
+                        ColorAsymmetryCard(
+                            asymmetry = asymmetry,
+                            modifier  = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
+            // ── Phase failure heatmap ──────────────────────────────────────────
+            if (state.phaseFailureHeatmap.any { it.total > 0 }) {
+                CollapsibleSection(title = "Phase × Failure Heatmap") {
+                    PhaseFailureHeatmapCard(
+                        rows     = state.phaseFailureHeatmap,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // ── Decision velocity consistency ──────────────────────────────────
+            state.velocityConsistency?.let { consistency ->
+                CollapsibleSection(title = "Decision Velocity Consistency") {
+                    VelocityConsistencyCard(
+                        consistency = consistency,
+                        modifier    = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // ── Weakness improvement trajectory ────────────────────────────────
+            state.improvementTrajectory?.let { trajectory ->
+                CollapsibleSection(title = "Weakness Trajectory") {
+                    ImprovementTrajectoryCard(
+                        trajectory = trajectory,
+                        modifier   = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            // ── Opening deviation convergence ──────────────────────────────────
+            if (state.openingDeviationRows.isNotEmpty()) {
+                CollapsibleSection(title = "Opening Preparation Depth") {
+                    OpeningDeviationConvergenceCard(
+                        rows     = state.openingDeviationRows,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }

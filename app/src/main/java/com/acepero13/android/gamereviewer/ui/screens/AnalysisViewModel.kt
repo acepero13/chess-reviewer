@@ -383,6 +383,14 @@ data class AnalysisUiState(
     /** True while the Pivotal Moments overview panel is shown before the session begins. */
     val showPivotalMomentsPanel: Boolean = false,
 
+    // ── Overthought positions (time-based coaching) ───────────────────────────
+    /**
+     * Move indices (1-based) where the player spent ≥ [TimeAnalyzer.SLOW_MOVE_SECONDS]s
+     * but still blundered — the classic "overthought" failure mode.  Populated after
+     * background analysis completes AND clock data is available in the PGN.
+     */
+    val overthougtMoveIndices: Set<Int> = emptySet(),
+
     // ── Calibration quiz ─────────────────────────────────────────────────────
     /** True while the CalibrationPanel is visible to the user. */
     val showCalibrationPanel: Boolean = false,
@@ -2758,6 +2766,19 @@ class AnalysisViewModel(
                     fenSequence = fenSequence,
                     moveTimes   = moveTimes,
                 )
+                // Compute overthought move indices from restored truth map + moveTimes
+                val overthougtRestoredEvals = truthMap.map { entry ->
+                    GameEvaluation(gameId = gameId, moveIndex = entry.moveIndex,
+                        evalCp = entry.evalCp, evalDelta = entry.evalDelta,
+                        motif = entry.motif, pvLine = entry.pvLine)
+                }
+                val overthougtRestored = com.acepero13.android.gamereviewer.domain.TimeAnalyzer
+                    .overthougtMoveIndices(
+                        com.acepero13.android.gamereviewer.domain.TimeAnalyzer.analyze(
+                            overthougtRestoredEvals, moveTimes.values.toList()
+                        )
+                    )
+
                 _uiState.update { st ->
                     val story       = buildGameStory(st.criticalMoments, uciMoves.size)
                     val atEnd       = st.moveIndex == uciMoves.size && !st.showPostGameDebrief
@@ -2772,6 +2793,7 @@ class AnalysisViewModel(
                         showPostGameDebrief        = st.showPostGameDebrief || atEnd,
                         predictionMatchResult      = matchResult,
                         gameStoryUnlocked          = st.gameStoryUnlocked || atEnd,
+                        overthougtMoveIndices      = overthougtRestored,
                     )
                 }
                 // Check if the user already navigated past unreviewed critical moments
@@ -2875,6 +2897,12 @@ class AnalysisViewModel(
             )
 
             val freshMoments = criticalMomentDao.getByGameId(gameId)
+            val overthougtFresh = com.acepero13.android.gamereviewer.domain.TimeAnalyzer
+                .overthougtMoveIndices(
+                    com.acepero13.android.gamereviewer.domain.TimeAnalyzer.analyze(
+                        evaluations, moveTimes.values.toList()
+                    )
+                )
             _uiState.update { st ->
                 val story       = buildGameStory(freshMoments, uciMoves.size)
                 val atEnd       = st.moveIndex == uciMoves.size && !st.showPostGameDebrief
@@ -2888,6 +2916,7 @@ class AnalysisViewModel(
                     showPostGameDebrief        = st.showPostGameDebrief || atEnd,
                     predictionMatchResult      = matchResult,
                     gameStoryUnlocked          = st.gameStoryUnlocked || atEnd,
+                    overthougtMoveIndices      = overthougtFresh,
                 )
             }
             // Check if the user navigated past unreviewed critical positions while analysis ran

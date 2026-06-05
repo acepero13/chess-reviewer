@@ -18,6 +18,10 @@ interface MoveTimeDao {
     @Query("SELECT COUNT(*) FROM move_times WHERE gameId = :gameId")
     suspend fun countByGameId(gameId: Long): Int
 
+    /** All move times across every game — used by the dashboard for velocity consistency analysis. */
+    @Query("SELECT * FROM move_times")
+    suspend fun getAll(): List<MoveTimeData>
+
     /** Wipe all move-time records. Used by the "Clear all data" Settings action. */
     @Query("DELETE FROM move_times")
     suspend fun deleteAll()

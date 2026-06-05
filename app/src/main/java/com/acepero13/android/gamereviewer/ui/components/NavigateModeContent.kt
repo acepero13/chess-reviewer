@@ -54,12 +54,17 @@ private fun severityColor(s: HighlightSeverity) = when (s) {
  * Shows the [MoveTree] and, when a comment exists at the current position,
  * a read-only comment card so the annotation is never silently missed.
  * Engine highlights are intentionally withheld here (Human-First philosophy).
+ *
+ * When [isOverthougt] is true, a subtle warning badge appears indicating the
+ * player spent significant time calculating but still blundered — a sign of
+ * a flawed calculation process rather than a rushed decision.
  */
 @Composable
 fun NavigateModeContent(
     entries: List<TreeDisplayItem>,
     onNodeClick: (Long) -> Unit,
     currentComment: String = "",
+    isOverthougt: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -71,9 +76,34 @@ fun NavigateModeContent(
             onNodeClick = onNodeClick,
             modifier    = Modifier.fillMaxWidth(),
         )
+        if (isOverthougt) {
+            OverthougtBanner(modifier = Modifier.fillMaxWidth())
+        }
         if (currentComment.isNotBlank()) {
             CommentBanner(comment = currentComment, modifier = Modifier.fillMaxWidth())
         }
+    }
+}
+
+@Composable
+private fun OverthougtBanner(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFFFF9800).copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text  = "⏱",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text  = "Overthought — long calculation that still produced a blunder",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFFFF9800),
+        )
     }
 }
 

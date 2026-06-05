@@ -43,6 +43,10 @@ interface ReviewGameDao {
     @Query("SELECT COUNT(*) FROM review_games WHERE importedAt >= :since")
     fun countRecentGames(since: Long): Flow<Int>
 
+    /** All games — used by the dashboard for cross-game analytics. */
+    @Query("SELECT * FROM review_games ORDER BY date ASC, importedAt ASC")
+    suspend fun getAll(): List<ReviewGame>
+
     /** Wipe all imported games. Used by the "Clear all data" Settings action. */
     @Query("DELETE FROM review_games")
     suspend fun deleteAll()

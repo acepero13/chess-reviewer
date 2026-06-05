@@ -96,11 +96,22 @@ val appModule = module {
             evalDao           = get(),
             moveTimeDao       = get(),
             criticalMomentDao = get(),
+            annotationDao     = get(),
             settingsRepo      = get(),
             openingClassifier = get(),
         )
     }
-    viewModel { DashboardViewModel(get(), get(), get(), get()) }
+    viewModel {
+        DashboardViewModel(
+            repo              = get(),
+            criticalMomentDao = get(),
+            masteryRepo       = get(),
+            endgameEncounterDao = get(),
+            settingsRepo      = get(),
+            moveTimeDao       = get(),
+            openingClassifier = get(),
+        )
+    }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get()) }
     viewModel { (categoryNames: List<String>) ->
