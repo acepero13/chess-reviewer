@@ -19,6 +19,8 @@ import com.acepero13.android.gamereviewer.domain.InsightReconciler
 import com.acepero13.android.gamereviewer.domain.OpeningDeviation
 import com.acepero13.android.gamereviewer.domain.OpeningDeviationAnalyzer
 import com.acepero13.android.gamereviewer.domain.extractUciMovesFromFullPgn
+import com.acepero13.android.gamereviewer.domain.extractMoveAnnotations
+import com.acepero13.chess.core.pgn.PgnImporter
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import com.acepero13.android.gamereviewer.domain.TruthMapEntry
 import com.acepero13.android.gamereviewer.engine.highlights.BoardAttackHelper
@@ -452,6 +454,9 @@ class AnalysisViewModel(
 
     /** Annotation cache keyed by FEN to reduce DB round-trips. */
     private val annotationCache = mutableMapOf<String, PositionAnnotation?>()
+
+    /** Original PGN brace comments keyed by 0-based half-move index (parallel to uciMoves). */
+    private var pgnAnnotations: Map<Int, String> = emptyMap()
 
     private val gson = Gson()
 
@@ -2473,6 +2478,10 @@ class AnalysisViewModel(
             Log.d(tag, "loadGame: uciMoves.size=${uciMoves.size}  first3=${uciMoves.take(3)}")
             buildFenAndSanSequence()
             Log.d(tag, "loadGame: fenSequence.size=${fenSequence.size}  sanMoves.size=${sanMoves.size}")
+            pgnAnnotations = PgnImporter().parseGame(game.pgn)
+                ?.let { extractMoveAnnotations(it.movesPgn) }
+                ?: emptyMap()
+            Log.d(tag, "loadGame: pgnAnnotations.size=${pgnAnnotations.size}")
 
             // Pre-warm annotation cache so navigation never needs runBlocking on the main thread.
             for (fen in fenSequence) {
@@ -2568,7 +2577,8 @@ class AnalysisViewModel(
         val annot      = getCachedAnnotation(fen)
         val arrows     = annot?.arrowsJson?.let { parseArrows(it) }  ?: emptyList()
         val marks      = annot?.markedSquaresJson?.let { parseMarks(it) } ?: emptyList()
-        val comment    = annot?.moveComment ?: ""
+        val userComment = annot?.moveComment ?: ""
+        val comment    = userComment.ifBlank { pgnAnnotations[index - 1] ?: "" }
         // Editor mode active only in Analyse > EDIT sub-mode (read live state to avoid races)
         val live       = _uiState.value
         val inEditMode = live.reviewMode == ReviewMode.ANALYSE && live.analyseSubMode == AnalyseSubMode.EDIT
@@ -2686,7 +2696,8 @@ class AnalysisViewModel(
             val isWhite = idx % 2 == 0
             val fen     = fenSequence.getOrElse(mIdx) { START_FEN }
             val annot   = getCachedAnnotation(fen)
-            val comment = annot?.moveComment ?: ""
+            val userComment = annot?.moveComment ?: ""
+            val comment = userComment.ifBlank { pgnAnnotations[idx] ?: "" }
             val hasAnnot = comment.isNotBlank() ||
                 (annot?.arrowsJson?.length ?: 0) > 2 ||
                 (annot?.markedSquaresJson?.length ?: 0) > 2

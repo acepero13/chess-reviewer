@@ -32,8 +32,7 @@ import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.LastPage
 import androidx.compose.material.icons.automirrored.outlined.NavigateBefore
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
@@ -78,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.ui.components.ANNOTATION_COLORS
 import com.acepero13.chess.core.ui.board.ChessBoard
+import com.acepero13.chess.core.ui.components.MoveTree
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.CorrectGreen
 import com.acepero13.chess.core.ui.theme.LocalAppColors
@@ -570,6 +570,44 @@ private fun GuessingContent(
             }
         }
 
+        // Move tree breadcrumb (played moves so far — read-only during guessing)
+        if (state.treeItems.isNotEmpty()) {
+            MoveTree(
+                entries     = state.treeItems,
+                onNodeClick = { /* read-only during guessing */ },
+                modifier    = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+            )
+        }
+
+        // Preamble annotation card (game notes from the annotator)
+        if (state.preambleAnnotation != null && !state.preambleDismissed) {
+            PreambleAnnotationCard(
+                text      = state.preambleAnnotation,
+                onDismiss = vm::dismissPreamble,
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+            )
+        }
+
+        // Opponent auto-move annotation (shown during GUESSING when opponent has an annotated reply)
+        AnimatedVisibility(
+            visible = state.phase == GuessTheMovePhase.GUESSING && state.opponentAnnotation != null,
+            enter   = expandVertically() + fadeIn(),
+            exit    = shrinkVertically() + fadeOut(),
+        ) {
+            if (state.opponentAnnotation != null) {
+                OpponentAnnotationCard(
+                    text     = state.opponentAnnotation,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                )
+            }
+        }
+
         // Move reveal panel (shown only in MOVE_REVEALED)
         AnimatedVisibility(
             visible = state.phase == GuessTheMovePhase.MOVE_REVEALED,
@@ -663,31 +701,21 @@ private fun MoveRevealPanel(
             // ── Original PGN annotation ────────────────────────────────────────
             if (state.originalAnnotation != null) {
                 HorizontalDivider(color = appColors.border)
-                TextButton(
-                    onClick  = vm::toggleOriginalAnnotation,
-                    modifier = Modifier.fillMaxWidth(),
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    verticalAlignment     = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        if (state.showOriginalAnnotation) Icons.Outlined.ExpandLess
-                        else Icons.Outlined.ExpandMore,
+                        Icons.Outlined.RateReview,
                         contentDescription = null,
-                        tint = appColors.textSecondary,
-                        modifier = Modifier.size(16.dp),
+                        tint     = appColors.textTertiary,
+                        modifier = Modifier.size(14.dp).padding(top = 2.dp),
                     )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        if (state.showOriginalAnnotation) "Hide annotation"
-                        else "Show original annotation",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = appColors.textSecondary,
-                    )
-                }
-                AnimatedVisibility(visible = state.showOriginalAnnotation) {
                     Text(
                         state.originalAnnotation,
                         style    = MaterialTheme.typography.bodySmall,
                         color    = appColors.textSecondary,
-                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
             }
@@ -891,6 +919,15 @@ private fun ReviewContent(
             modifier       = Modifier.fillMaxWidth(),
         )
 
+        // ── Move breadcrumb tree ──────────────────────────────────────────────
+        MoveTree(
+            entries     = state.treeItems,
+            onNodeClick = vm::onTreeNodeClick,
+            modifier    = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+
         // ── Move label ────────────────────────────────────────────────────────
         Text(
             moveLabel,
@@ -972,6 +1009,90 @@ private fun ReviewContent(
                 "Back to Results",
                 style = MaterialTheme.typography.bodyMedium,
                 color = appColors.textSecondary,
+            )
+        }
+    }
+}
+
+// ── Preamble annotation card ──────────────────────────────────────────────────
+
+@Composable
+private fun PreambleAnnotationCard(
+    text:      String,
+    onDismiss: () -> Unit,
+    modifier:  Modifier = Modifier,
+) {
+    val appColors = LocalAppColors.current
+    androidx.compose.material3.Card(
+        modifier = modifier,
+        colors   = androidx.compose.material3.CardDefaults.cardColors(containerColor = appColors.surface),
+        shape    = RoundedCornerShape(8.dp),
+        border   = BorderStroke(1.dp, appColors.border.copy(alpha = 0.5f)),
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)) {
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Game Notes",
+                    style      = MaterialTheme.typography.labelSmall,
+                    color      = ChessGold,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                IconButton(
+                    onClick  = onDismiss,
+                    modifier = Modifier.size(20.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Dismiss",
+                        tint     = appColors.textTertiary,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text,
+                style    = MaterialTheme.typography.bodySmall,
+                color    = appColors.textSecondary,
+                maxLines = 5,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// ── Opponent auto-move annotation card ───────────────────────────────────────
+
+@Composable
+private fun OpponentAnnotationCard(text: String, modifier: Modifier = Modifier) {
+    val appColors = LocalAppColors.current
+    androidx.compose.material3.Card(
+        modifier = modifier,
+        colors   = androidx.compose.material3.CardDefaults.cardColors(containerColor = appColors.surface),
+        shape    = RoundedCornerShape(8.dp),
+        border   = BorderStroke(1.dp, appColors.border.copy(alpha = 0.5f)),
+    ) {
+        Row(
+            modifier          = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                Icons.Outlined.RateReview,
+                contentDescription = null,
+                tint     = appColors.textTertiary,
+                modifier = Modifier.size(14.dp).padding(top = 2.dp),
+            )
+            Text(
+                text,
+                style    = MaterialTheme.typography.bodySmall,
+                color    = appColors.textSecondary,
+                maxLines = 5,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
         }
     }

@@ -6,6 +6,28 @@ import com.github.bhlangonijr.chesslib.move.MoveList
 private const val PTAG = "PgnUtils"
 
 /**
+ * Extracts the first brace comment that appears before any SAN move letter — the
+ * game preamble written by the annotator (e.g. opening description, context notes).
+ * Returns null when there is no such comment or when it only contains clock/NAG data.
+ */
+fun extractPreambleAnnotation(movesPgn: String): String? {
+    var i = 0
+    while (i < movesPgn.length) {
+        when {
+            movesPgn[i] == '{' -> {
+                val start = i + 1
+                val end   = movesPgn.indexOf('}', start).takeIf { it >= 0 } ?: return null
+                val text  = movesPgn.substring(start, end).trim()
+                return if (text.isNotBlank() && !text.startsWith("[%")) text else null
+            }
+            movesPgn[i].isLetter() -> return null
+            else -> i++
+        }
+    }
+    return null
+}
+
+/**
  * Strips brace comments `{ … }` and variation parentheses `( … )` from a PGN
  * move-text string, returning only the main-line tokens.
  *
@@ -99,8 +121,14 @@ fun extractMoveAnnotations(movesPgn: String): Map<Int, String> {
                 i = end + 1
             }
             ch.isDigit() && (i == 0 || movesPgn[i - 1].isWhitespace() || movesPgn[i - 1] == '{' || movesPgn[i - 1] == '}') -> {
-                // Skip move number tokens like "1." or "23..."
-                while (i < movesPgn.length && (movesPgn[i].isDigit() || movesPgn[i] == '.')) i++
+                // Check for castling notation: 0-0 or 0-0-0
+                if (ch == '0' && i + 1 < movesPgn.length && movesPgn[i + 1] == '-') {
+                    halfMoveIndex++
+                    while (i < movesPgn.length && !movesPgn[i].isWhitespace() && movesPgn[i] != '{' && movesPgn[i] != '(') i++
+                } else {
+                    // Skip move number tokens like "1." or "23..."
+                    while (i < movesPgn.length && (movesPgn[i].isDigit() || movesPgn[i] == '.')) i++
+                }
             }
             ch.isLetter() -> {
                 // A SAN move token — advance half-move index

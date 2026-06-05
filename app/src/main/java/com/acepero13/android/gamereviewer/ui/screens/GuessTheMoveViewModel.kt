@@ -8,7 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.GuessMoveSessionDao
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.domain.extractMoveAnnotations
+import com.acepero13.android.gamereviewer.domain.extractPreambleAnnotation
 import com.acepero13.android.gamereviewer.domain.pgnToUciMoves
+import com.acepero13.chess.core.ui.components.TreeDisplayItem
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.data.model.PositionAnnotation
@@ -90,7 +92,13 @@ data class GuessTheMoveUiState(
     val masterMoveSan: String = "",
     val wasExactMatch: Boolean = false,
     val originalAnnotation: String? = null,
-    val showOriginalAnnotation: Boolean = false,
+    // ── Annotation for auto-played opponent move (shown during GUESSING) ─────
+    val opponentAnnotation: String? = null,
+    // ── Game preamble annotation (shown before/during game) ───────────────────
+    val preambleAnnotation: String? = null,
+    val preambleDismissed: Boolean = false,
+    // ── Move breadcrumb tree ──────────────────────────────────────────────────
+    val treeItems: List<TreeDisplayItem> = emptyList(),
     // ── User reflection annotation ────────────────────────────────────────────
     val currentUserComment: String = "",
     val currentArrowColor: Color = Color(0xFFFFD700),
@@ -123,6 +131,10 @@ class GuessTheMoveViewModel(
 
     // Tracks the current FEN for annotation saving (the master's post-move FEN)
     private var currentPostFen: String = START_FEN
+
+    // Pre-built FEN/SAN sequences for the entire game (built once per game load)
+    private var allFenSequence: List<String> = listOf(START_FEN)
+    private var allSanSequence: List<String> = emptyList()
 
     // ── Source selection ──────────────────────────────────────────────────────
 
@@ -205,9 +217,25 @@ class GuessTheMoveViewModel(
         if (uciMoves.isEmpty()) error("Game has no parseable moves")
 
         val annotations = extractMoveAnnotations(parsed.movesPgn)
+        val preamble    = extractPreambleAnnotation(parsed.movesPgn)
         val gameDesc    = buildGameDescription(parsed.headers)
         val white       = parsed.headers["White"] ?: ""
         val black       = parsed.headers["Black"] ?: ""
+
+        // Build FEN/SAN sequence for the full game once so tree items and review can reuse it
+        withContext(Dispatchers.Default) {
+            val fens = mutableListOf(START_FEN)
+            val sans = mutableListOf<String>()
+            var fen  = START_FEN
+            for (uci in uciMoves) {
+                val board = Board().apply { loadFromFen(fen) }
+                sans.add(runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci))
+                fen = treeBuilder.applyUci(fen, uci) ?: break
+                fens.add(fen)
+            }
+            allFenSequence = fens
+            allSanSequence = sans
+        }
 
         withContext(Dispatchers.Main) {
             currentPostFen = START_FEN
@@ -220,6 +248,8 @@ class GuessTheMoveViewModel(
                     blackPlayer            = black,
                     masterMoves            = uciMoves,
                     moveAnnotations        = annotations,
+                    preambleAnnotation     = preamble,
+                    preambleDismissed      = false,
                     currentMoveIndex       = 0,
                     boardState             = BoardState(fen = START_FEN, isEditorMode = false),
                     isEditorMode           = false,
@@ -229,11 +259,11 @@ class GuessTheMoveViewModel(
                     masterMoveSan          = "",
                     wasExactMatch          = false,
                     originalAnnotation     = null,
-                    showOriginalAnnotation = false,
                     currentUserComment     = "",
                     engineArrow            = null,
                     engineEvalCp           = null,
                     selectedSide           = side,
+                    treeItems              = emptyList(),
                 )
             }
         }
@@ -381,12 +411,13 @@ class GuessTheMoveViewModel(
                 masterMoveSan          = masterSan,
                 wasExactMatch          = false,
                 originalAnnotation     = st.moveAnnotations[st.currentMoveIndex],
-                showOriginalAnnotation = false,
+                opponentAnnotation     = null,
                 currentUserComment     = "",
                 engineArrow            = null,
                 engineEvalCp           = null,
             )
         }
+        rebuildTreeItems()
         viewModelScope.launch(Dispatchers.IO) {
             val saved  = runCatching { annotationDao.getByFen(masterPostFen) }.getOrNull()
             val arrows = saved?.arrowsJson?.let { parseArrows(it) } ?: emptyList()
@@ -452,18 +483,19 @@ class GuessTheMoveViewModel(
                     userArrows     = emptyList(),
                     markedSquares  = emptyList(),
                 ),
-                userMoveSan           = userSan,
-                masterMoveSan         = masterSan,
-                wasExactMatch         = isExact,
-                originalAnnotation    = annotation,
-                showOriginalAnnotation = false,
-                currentUserComment    = existingUserComment,
-                exactMatches          = if (isExact) it.exactMatches + 1 else it.exactMatches,
-                totalPresented        = it.totalPresented + 1,
-                engineArrow           = null,
-                engineEvalCp          = null,
+                userMoveSan        = userSan,
+                masterMoveSan      = masterSan,
+                wasExactMatch      = isExact,
+                originalAnnotation = annotation,
+                opponentAnnotation = null,
+                currentUserComment = existingUserComment,
+                exactMatches       = if (isExact) it.exactMatches + 1 else it.exactMatches,
+                totalPresented     = it.totalPresented + 1,
+                engineArrow        = null,
+                engineEvalCp       = null,
             )
         }
+        rebuildTreeItems()
 
         // Load the user's existing annotation for this FEN from DB in the background
         viewModelScope.launch(Dispatchers.IO) {
@@ -481,11 +513,11 @@ class GuessTheMoveViewModel(
         }
     }
 
-    // ── MOVE_REVEALED actions ─────────────────────────────────────────────────
-
-    fun toggleOriginalAnnotation() {
-        _uiState.update { it.copy(showOriginalAnnotation = !it.showOriginalAnnotation) }
+    fun dismissPreamble() {
+        _uiState.update { it.copy(preambleDismissed = true) }
     }
+
+    // ── MOVE_REVEALED actions ─────────────────────────────────────────────────
 
     fun updateUserComment(text: String) {
         _uiState.update { it.copy(currentUserComment = text) }
@@ -558,12 +590,11 @@ class GuessTheMoveViewModel(
 
         _uiState.update {
             it.copy(
-                currentMoveIndex       = nextIndex,
-                phase                  = GuessTheMovePhase.GUESSING,
-                isEditorMode           = false,
-                originalAnnotation     = null,
-                showOriginalAnnotation = false,
-                engineArrow            = null,
+                currentMoveIndex   = nextIndex,
+                phase              = GuessTheMovePhase.GUESSING,
+                isEditorMode       = false,
+                originalAnnotation = null,
+                engineArrow        = null,
                 engineEvalCp           = null,
                 userMoveSan            = "",
                 masterMoveSan          = "",
@@ -613,21 +644,24 @@ class GuessTheMoveViewModel(
                 if (nextIndex >= moves.size) {
                     _uiState.update {
                         it.copy(
-                            phase        = GuessTheMovePhase.GAME_COMPLETE,
+                            phase            = GuessTheMovePhase.GAME_COMPLETE,
                             currentMoveIndex = nextIndex,
-                            boardState   = it.boardState.copy(fen = newFen, lastMove = masterMove),
+                            boardState       = it.boardState.copy(fen = newFen, lastMove = masterMove),
                         )
                     }
+                    rebuildTreeItems()
                     saveSession()
                     return@launch
                 }
 
+                val autoAnnotation = _uiState.value.moveAnnotations[index]
                 _uiState.update {
                     it.copy(
-                        currentMoveIndex = nextIndex,
-                        phase            = GuessTheMovePhase.GUESSING,
-                        isEditorMode     = false,
-                        boardState       = it.boardState.copy(
+                        currentMoveIndex   = nextIndex,
+                        phase              = GuessTheMovePhase.GUESSING,
+                        isEditorMode       = false,
+                        opponentAnnotation = autoAnnotation,
+                        boardState         = it.boardState.copy(
                             fen            = newFen,
                             lastMove       = masterMove,
                             selectedSquare = null,
@@ -636,6 +670,7 @@ class GuessTheMoveViewModel(
                         ),
                     )
                 }
+                rebuildTreeItems()
                 // Recurse in case multiple consecutive opponent moves
                 maybeAutoAdvance(nextIndex, moves, side)
             }
@@ -645,37 +680,28 @@ class GuessTheMoveViewModel(
     // ── Review mode ───────────────────────────────────────────────────────────
 
     fun startReview() {
+        // Reuse pre-built sequences from game load; fall back to rebuilding if empty
+        val fens  = if (allFenSequence.size > 1) allFenSequence else listOf(START_FEN)
+        val sans  = allSanSequence
         val moves = _uiState.value.masterMoves
-        viewModelScope.launch(Dispatchers.Default) {
-            val fens  = mutableListOf(START_FEN)
-            val sans  = mutableListOf<String>()
-            var fen   = START_FEN
-            for (uci in moves) {
-                val board = Board().apply { loadFromFen(fen) }
-                sans.add(runCatching { ChessUtils.uciToSan(board, uci) }.getOrDefault(uci))
-                fen = treeBuilder.applyUci(fen, uci) ?: break
-                fens.add(fen)
-            }
-            withContext(Dispatchers.Main) {
-                _uiState.update {
-                    it.copy(
-                        phase             = GuessTheMovePhase.REVIEWING,
-                        fenHistory        = fens,
-                        masterSanHistory  = sans,
-                        reviewIndex       = fens.lastIndex,
-                        boardState        = it.boardState.copy(
-                            fen            = fens.last(),
-                            lastMove       = resolveLastMove(fens, moves, fens.lastIndex),
-                            selectedSquare = null,
-                            legalMoves     = emptyList(),
-                            isEditorMode   = false,
-                            userArrows     = emptyList(),
-                            markedSquares  = emptyList(),
-                        ),
-                    )
-                }
-            }
+        _uiState.update {
+            it.copy(
+                phase            = GuessTheMovePhase.REVIEWING,
+                fenHistory       = fens,
+                masterSanHistory = sans,
+                reviewIndex      = fens.lastIndex,
+                boardState       = it.boardState.copy(
+                    fen            = fens.last(),
+                    lastMove       = resolveLastMove(fens, moves, fens.lastIndex),
+                    selectedSquare = null,
+                    legalMoves     = emptyList(),
+                    isEditorMode   = false,
+                    userArrows     = emptyList(),
+                    markedSquares  = emptyList(),
+                ),
+            )
         }
+        rebuildTreeItems()
     }
 
     fun reviewGoTo(index: Int) {
@@ -693,6 +719,7 @@ class GuessTheMoveViewModel(
                 ),
             )
         }
+        rebuildTreeItems()
     }
 
     fun exitReview() {
@@ -741,6 +768,62 @@ class GuessTheMoveViewModel(
                 )
             }.onFailure { Log.e(TAG, "saveSession failed", it) }
         }
+    }
+
+    // ── Move tree ─────────────────────────────────────────────────────────────
+
+    /** Called from Review mode when the user taps a move chip. */
+    fun onTreeNodeClick(nodeId: Long) {
+        if (_uiState.value.phase == GuessTheMovePhase.REVIEWING) reviewGoTo(nodeId.toInt())
+    }
+
+    private fun rebuildTreeItems() {
+        val st  = _uiState.value
+        // Number of master moves currently shown on the board
+        val positionIdx = when (st.phase) {
+            GuessTheMovePhase.MOVE_REVEALED -> st.currentMoveIndex + 1
+            GuessTheMovePhase.REVIEWING     -> st.reviewIndex
+            else                            -> st.currentMoveIndex
+        }
+        // During guessing only show moves played so far (no spoilers); in review show all
+        val upTo = when (st.phase) {
+            GuessTheMovePhase.REVIEWING -> allSanSequence.size
+            else                        -> positionIdx
+        }
+        // Only show PGN annotations during review (avoids revealing hints while guessing)
+        val anns = if (st.phase == GuessTheMovePhase.REVIEWING) st.moveAnnotations else emptyMap()
+        _uiState.update { it.copy(treeItems = buildTreeItems(upTo, positionIdx, anns)) }
+    }
+
+    private fun buildTreeItems(
+        upToMoveCount: Int,
+        currentMoveCount: Int,
+        annotations: Map<Int, String>,
+    ): List<TreeDisplayItem> {
+        val items  = mutableListOf<TreeDisplayItem>()
+        var moveNo = 1
+        for (idx in 0 until minOf(upToMoveCount, allSanSequence.size)) {
+            val san     = allSanSequence[idx]
+            val fen     = allFenSequence.getOrElse(idx + 1) { START_FEN }
+            val comment = annotations[idx] ?: ""
+            val isWhite = idx % 2 == 0
+            items.add(
+                TreeDisplayItem.MoveItem(
+                    nodeId         = (idx + 1).toLong(),
+                    san            = san,
+                    fen            = fen,
+                    comment        = comment,
+                    hasAnnotations = comment.isNotBlank(),
+                    isCurrentMove  = (idx + 1) == currentMoveCount,
+                    depth          = 0,
+                    moveNumber     = moveNo,
+                    isWhiteMove    = isWhite,
+                    showMoveNumber = isWhite,
+                )
+            )
+            if (!isWhite) moveNo++
+        }
+        return items
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
