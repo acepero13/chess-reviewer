@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EmojiObjects
@@ -41,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +55,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
+import com.acepero13.chess.core.ui.board.BoardState
+import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.CorrectGreen
 import com.acepero13.chess.core.ui.theme.LocalAppColors
@@ -58,6 +64,7 @@ import com.acepero13.chess.core.ui.theme.WrongRed
 import org.koin.androidx.compose.koinViewModel
 import androidx.compose.material.icons.outlined.Star
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onOpenGameList:            () -> Unit,
@@ -173,7 +180,10 @@ fun HomeScreen(
                         modifier = Modifier.padding(horizontal = 16.dp),
                     )
                     Spacer(Modifier.height(10.dp))
+                    val masterRowState = rememberLazyListState()
                     LazyRow(
+                        state                 = masterRowState,
+                        flingBehavior         = rememberSnapFlingBehavior(masterRowState),
                         contentPadding        = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -512,64 +522,79 @@ private fun MasterGameCard(
 ) {
     val appColors = LocalAppColors.current
     Card(
-        modifier = Modifier.width(160.dp),
+        modifier = Modifier.width(168.dp),
         colors   = CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(10.dp),
         border   = BorderStroke(1.dp, ChessGold.copy(alpha = 0.30f)),
         onClick  = onClick,
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector        = Icons.Outlined.Star,
-                    contentDescription = null,
-                    tint               = ChessGold,
-                    modifier           = Modifier.size(11.dp),
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+            ) {
+                ChessBoard(
+                    boardState    = BoardState(fen = game.fen),
+                    onSquareTap   = {},
+                    modifier      = Modifier.fillMaxWidth(),
+                    thumbnailMode = true,
                 )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text          = "MASTER",
-                    style         = MaterialTheme.typography.labelSmall,
-                    color         = ChessGold,
-                    letterSpacing = 0.8.sp,
-                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .background(
+                            color = appColors.surface.copy(alpha = 0.75f),
+                            shape = RoundedCornerShape(4.dp),
+                        )
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector        = Icons.Outlined.Star,
+                            contentDescription = null,
+                            tint               = ChessGold,
+                            modifier           = Modifier.size(9.dp),
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text          = "GM",
+                            style         = MaterialTheme.typography.labelSmall,
+                            color         = ChessGold,
+                            letterSpacing = 0.5.sp,
+                        )
+                    }
+                }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text       = game.white.take(16),
-                style      = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-                color      = appColors.textPrimary,
-                maxLines   = 1,
-            )
-            Text(
-                text  = "vs",
-                style = MaterialTheme.typography.labelSmall,
-                color = appColors.textTertiary,
-            )
-            Text(
-                text       = game.black.take(16),
-                style      = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-                color      = appColors.textPrimary,
-                maxLines   = 1,
-            )
-            if (game.event.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(
-                    text     = game.event,
-                    style    = MaterialTheme.typography.labelSmall,
-                    color    = appColors.textSecondary,
-                    maxLines = 2,
+                    text       = game.white,
+                    style      = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = appColors.textPrimary,
+                    maxLines   = 1,
                 )
-            }
-            if (game.year.isNotBlank() && !game.year.startsWith("?")) {
-                Spacer(Modifier.height(2.dp))
                 Text(
-                    text  = game.year,
+                    text  = "vs",
                     style = MaterialTheme.typography.labelSmall,
                     color = appColors.textTertiary,
                 )
+                Text(
+                    text       = game.black,
+                    style      = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color      = appColors.textPrimary,
+                    maxLines   = 1,
+                )
+                if (game.year.isNotBlank() && !game.year.startsWith("?")) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text  = game.year,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = appColors.textTertiary,
+                    )
+                }
             }
         }
     }

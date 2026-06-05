@@ -6,12 +6,20 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.SessionDebrief
+import com.acepero13.android.gamereviewer.domain.pgnToUciMoves
+import com.github.bhlangonijr.chesslib.Board
+import com.github.bhlangonijr.chesslib.Piece
+import com.github.bhlangonijr.chesslib.Side
+import com.github.bhlangonijr.chesslib.Square
+import com.github.bhlangonijr.chesslib.move.Move
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
+
+private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 data class MasterGamePreview(
     val index: Int,
@@ -20,6 +28,7 @@ data class MasterGamePreview(
     val event: String,
     val year: String,
     val eco: String,
+    val fen: String = START_FEN,
 )
 
 class HomeViewModel(repo: GameRepository, private val context: Context) : ViewModel() {
@@ -47,6 +56,9 @@ class HomeViewModel(repo: GameRepository, private val context: Context) : ViewMo
             .filter { it.trimStart().startsWith("[") }
             .mapIndexed { idx, block ->
                 val h = headerRegex.findAll(block).associate { it.groupValues[1] to it.groupValues[2] }
+                val movesPgn = block.lines()
+                    .dropWhile { it.trimStart().startsWith("[") || it.isBlank() }
+                    .joinToString(" ")
                 MasterGamePreview(
                     index = idx,
                     white = h["White"] ?: "?",
@@ -54,7 +66,39 @@ class HomeViewModel(repo: GameRepository, private val context: Context) : ViewMo
                     event = h["Event"] ?: "",
                     year  = h["Date"]?.substringBefore(".") ?: "",
                     eco   = h["ECO"] ?: "",
+                    fen   = fenAtMoveN(movesPgn, targetMoveN = 15 + (idx % 10)),
                 )
             }
     }.getOrDefault(emptyList())
+
+    private fun fenAtMoveN(movesPgn: String, targetMoveN: Int): String {
+        if (movesPgn.isBlank()) return START_FEN
+        return runCatching {
+            val ucis = pgnToUciMoves(movesPgn).split(" ").filter { it.isNotBlank() }
+            if (ucis.isEmpty()) return@runCatching START_FEN
+            val board = Board()
+            board.loadFromFen(START_FEN)
+            val limit = minOf(targetMoveN, ucis.size)
+            for (i in 0 until limit) {
+                val uci = ucis[i]
+                if (uci.length < 4) continue
+                val from = Square.valueOf(uci.substring(0, 2).uppercase())
+                val to   = Square.valueOf(uci.substring(2, 4).uppercase())
+                val move = if (uci.length == 5) {
+                    val side = board.sideToMove
+                    val prom = when (uci[4].lowercaseChar()) {
+                        'r' -> if (side == Side.WHITE) Piece.WHITE_ROOK   else Piece.BLACK_ROOK
+                        'b' -> if (side == Side.WHITE) Piece.WHITE_BISHOP else Piece.BLACK_BISHOP
+                        'n' -> if (side == Side.WHITE) Piece.WHITE_KNIGHT else Piece.BLACK_KNIGHT
+                        else -> if (side == Side.WHITE) Piece.WHITE_QUEEN  else Piece.BLACK_QUEEN
+                    }
+                    Move(from, to, prom)
+                } else {
+                    Move(from, to)
+                }
+                board.doMove(move)
+            }
+            board.fen
+        }.getOrDefault(START_FEN)
+    }
 }
