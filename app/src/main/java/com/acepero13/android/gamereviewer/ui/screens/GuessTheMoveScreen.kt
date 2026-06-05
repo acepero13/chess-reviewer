@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.FirstPage
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -66,6 +67,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -92,9 +96,18 @@ fun GuessTheMoveScreen(
 ) {
     val state by vm.uiState.collectAsState()
     val appColors = LocalAppColors.current
+    var showNotesDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialGameIndex) {
         if (initialGameIndex >= 0) vm.startWithGameAtIndex(initialGameIndex)
+    }
+
+    if (showNotesDialog) {
+        NotesDialog(
+            text         = state.currentUserComment,
+            onTextChange = vm::updateUserComment,
+            onDismiss    = { showNotesDialog = false },
+        )
     }
 
     Scaffold(
@@ -135,6 +148,18 @@ fun GuessTheMoveScreen(
                             contentDescription = "Back",
                             tint = appColors.textPrimary,
                         )
+                    }
+                },
+                actions = {
+                    if (state.phase == GuessTheMovePhase.MOVE_REVEALED) {
+                        IconButton(onClick = { showNotesDialog = true }) {
+                            Icon(
+                                Icons.Outlined.RateReview,
+                                contentDescription = "Notes",
+                                tint = if (state.currentUserComment.isNotBlank()) ChessGold
+                                       else appColors.textSecondary,
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
@@ -722,24 +747,6 @@ private fun MoveRevealPanel(
 
             HorizontalDivider(color = appColors.border)
 
-            // ── User reflection text field ─────────────────────────────────────
-            OutlinedTextField(
-                value         = state.currentUserComment,
-                onValueChange = vm::updateUserComment,
-                placeholder   = { Text("Your thoughts on this move…", style = MaterialTheme.typography.bodySmall) },
-                modifier      = Modifier.fillMaxWidth(),
-                shape         = RoundedCornerShape(8.dp),
-                minLines      = 2,
-                maxLines      = 4,
-                colors        = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor   = ChessGold,
-                    unfocusedBorderColor = appColors.border,
-                    focusedTextColor     = appColors.textPrimary,
-                    unfocusedTextColor   = appColors.textPrimary,
-                    cursorColor          = ChessGold,
-                ),
-            )
-
             // ── Engine check (only shown if user's move differs from master) ───
             AnimatedVisibility(visible = !state.wasExactMatch) {
                 Column {
@@ -1096,6 +1103,57 @@ private fun OpponentAnnotationCard(text: String, modifier: Modifier = Modifier) 
             )
         }
     }
+}
+
+// ── Notes dialog ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun NotesDialog(
+    text:         String,
+    onTextChange: (String) -> Unit,
+    onDismiss:    () -> Unit,
+) {
+    val appColors = LocalAppColors.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "Your thoughts",
+                style = MaterialTheme.typography.titleMedium,
+                color = appColors.textPrimary,
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value         = text,
+                onValueChange = onTextChange,
+                placeholder   = {
+                    Text(
+                        "Your thoughts on this move…",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                modifier  = Modifier.fillMaxWidth(),
+                shape     = RoundedCornerShape(8.dp),
+                minLines  = 3,
+                maxLines  = 6,
+                colors    = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ChessGold,
+                    unfocusedBorderColor = appColors.border,
+                    focusedTextColor     = appColors.textPrimary,
+                    unfocusedTextColor   = appColors.textPrimary,
+                    cursorColor          = ChessGold,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = ChessGold, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        containerColor    = appColors.surface,
+        titleContentColor = appColors.textPrimary,
+    )
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
