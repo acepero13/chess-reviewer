@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.EndgameEncounter
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
+import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
@@ -29,6 +30,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   4 → added coachingTriggers column to game_evaluations (Board Scan triggers)
  *   5 → added endgame_encounters table (endgame chapter recognition)
  *   6 → added pvLine column to game_evaluations (forcing sequence PV storage)
+ *   7 → added guess_move_sessions table (Guess the Move training feature)
  */
 @Database(
     entities    = [
@@ -38,8 +40,9 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         GameEvaluation::class,
         MoveTimeData::class,
         EndgameEncounter::class,
+        GuessMoveSession::class,
     ],
-    version     = 6,
+    version     = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun gameEvaluationDao(): GameEvaluationDao
     abstract fun moveTimeDao(): MoveTimeDao
     abstract fun endgameEncounterDao(): EndgameEncounterDao
+    abstract fun guessMoveSessionDao(): GuessMoveSessionDao
 
     companion object {
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -82,6 +86,24 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE game_evaluations ADD COLUMN pvLine TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS guess_move_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        gameDescription TEXT NOT NULL,
+                        sourceLabel TEXT NOT NULL,
+                        totalMoves INTEGER NOT NULL,
+                        exactMatches INTEGER NOT NULL,
+                        guessingSide TEXT NOT NULL,
+                        completedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
                 )
             }
         }

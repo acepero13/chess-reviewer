@@ -17,6 +17,7 @@ import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameReportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.HomeViewModel
 import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
+import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
 import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillViewModel
@@ -37,7 +38,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -47,6 +48,7 @@ val appModule = module {
     single { get<AppDatabase>().gameEvaluationDao() }
     single { get<AppDatabase>().moveTimeDao() }
     single { get<AppDatabase>().endgameEncounterDao() }
+    single { get<AppDatabase>().guessMoveSessionDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -67,7 +69,7 @@ val appModule = module {
     single { MiddlegamePlanDetector(get()) }
 
     // ── ViewModels ────────────────────────────────────────────────────────────
-    viewModel { HomeViewModel(get()) }
+    viewModel { HomeViewModel(get(), androidContext()) }
     viewModel { GameListViewModel(get(), get()) }
     viewModel { ImportViewModel(get(), get(), get(), get(), get()) }
     viewModel { (gameId: Long) ->
@@ -114,6 +116,15 @@ val appModule = module {
     }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get()) }
+    viewModel {
+        GuessTheMoveViewModel(
+            context       = androidContext(),
+            importer      = get(),
+            dao           = get(),
+            annotationDao = get(),
+            engine        = get(),
+        )
+    }
     viewModel { (categoryNames: List<String>) ->
         WeaknessDrillViewModel(
             categoryNames     = categoryNames,

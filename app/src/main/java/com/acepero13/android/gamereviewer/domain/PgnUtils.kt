@@ -39,9 +39,20 @@ fun pgnToUciMoves(movesPgn: String): String {
     val stripped = stripPgnAnnotations(movesPgn)
     // Remove NAG annotations ($1, $18, …) which chesslib cannot parse
     val noNags = stripped.replace(Regex("""\$\d+"""), " ")
+    // Remove black-move restart notation: "23..." / "23. ..." / "10 ..."
+    // These appear after comments in annotated PGN and confuse chesslib's loadFromSan
+    val noRestarts = noNags.replace(Regex("""\b\d+\.?\s*\.{2,}"""), "")
+    // Remove move numbers without a trailing dot (e.g. "1 e4" style PGN).
+    // chesslib treats bare numbers as SAN tokens and throws MoveConversionException.
+    // Lookahead (?=\s|$) keeps numbers followed by "." (chesslib handles those).
+    // Lookbehind (?<!-) prevents stripping the digits inside "0-0" / "0-0-0".
+    val noBareMoveNums = noRestarts.replace(Regex("""(?<!-)\b\d+(?=\s|$)"""), "")
+    // Normalise castling: some PGN files use zeros ("0-0") rather than the standard
+    // capital-O form ("O-O") that chesslib requires. Replace longest first.
+    val castlingNorm = noBareMoveNums.replace("0-0-0", "O-O-O").replace("0-0", "O-O")
     // Remove game-result token at the end (1-0, 0-1, 1/2-1/2, *)
     // chesslib's MoveList.loadFromSan throws MoveConversionException on these tokens
-    val clean = noNags.replace(Regex("""(?:\s+|^)(1-0|0-1|1/2-1/2|\*)\s*$"""), "").trim()
+    val clean = castlingNorm.replace(Regex("""(?:\s+|^)(1-0|0-1|1/2-1/2|\*)\s*$"""), "").trim()
     Log.d(PTAG, "pgnToUciMoves: input.length=${movesPgn.length}  clean.length=${clean.length}  clean_preview='${clean.take(80)}'")
     return runCatching {
         val ml = MoveList()
@@ -57,6 +68,49 @@ fun pgnToUciMoves(movesPgn: String): String {
         Log.e(PTAG, "pgnToUciMoves: loadFromSan FAILED — ${e.javaClass.simpleName}: ${e.message}")
         ""
     }
+}
+
+/**
+ * Extracts PGN brace comments and maps them to their 0-based half-move index.
+ * Clock annotations ([%clk ...]) and NAG codes are skipped; only human-readable
+ * main-line comments are captured (variation parentheses and their content are ignored).
+ *
+ * Example: "1. e4 {King's pawn opening} e5 2. Nf3" → {0 → "King's pawn opening"}
+ */
+fun extractMoveAnnotations(movesPgn: String): Map<Int, String> {
+    val result = mutableMapOf<Int, String>()
+    var halfMoveIndex = -1
+    var i = 0
+    var parenDepth = 0
+
+    while (i < movesPgn.length) {
+        val ch = movesPgn[i]
+        when {
+            ch == '(' -> { parenDepth++; i++ }
+            ch == ')' -> { if (parenDepth > 0) parenDepth--; i++ }
+            parenDepth > 0 -> i++
+            ch == '{' -> {
+                val start = i + 1
+                val end = movesPgn.indexOf('}', start).takeIf { it >= 0 } ?: movesPgn.length
+                val comment = movesPgn.substring(start, end).trim()
+                if (!comment.startsWith("[%") && comment.isNotBlank() && halfMoveIndex >= 0) {
+                    result[halfMoveIndex] = comment
+                }
+                i = end + 1
+            }
+            ch.isDigit() && (i == 0 || movesPgn[i - 1].isWhitespace() || movesPgn[i - 1] == '{' || movesPgn[i - 1] == '}') -> {
+                // Skip move number tokens like "1." or "23..."
+                while (i < movesPgn.length && (movesPgn[i].isDigit() || movesPgn[i] == '.')) i++
+            }
+            ch.isLetter() -> {
+                // A SAN move token — advance half-move index
+                halfMoveIndex++
+                while (i < movesPgn.length && !movesPgn[i].isWhitespace() && movesPgn[i] != '{' && movesPgn[i] != '(') i++
+            }
+            else -> i++
+        }
+    }
+    return result
 }
 
 /**

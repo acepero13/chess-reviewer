@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.EmojiObjects
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Psychology
@@ -55,20 +56,24 @@ import com.acepero13.chess.core.ui.theme.CorrectGreen
 import com.acepero13.chess.core.ui.theme.LocalAppColors
 import com.acepero13.chess.core.ui.theme.WrongRed
 import org.koin.androidx.compose.koinViewModel
+import androidx.compose.material.icons.outlined.Star
 
 @Composable
 fun HomeScreen(
-    onOpenGameList:  () -> Unit,
-    onOpenImport:    () -> Unit,
-    onOpenDashboard: () -> Unit = {},
-    onOpenSettings:  () -> Unit = {},
-    onOpenDebrief:   () -> Unit = {},
-    onOpenAnalysis:  (Long) -> Unit = {},
+    onOpenGameList:            () -> Unit,
+    onOpenImport:              () -> Unit,
+    onOpenDashboard:           () -> Unit = {},
+    onOpenSettings:            () -> Unit = {},
+    onOpenDebrief:             () -> Unit = {},
+    onOpenAnalysis:            (Long) -> Unit = {},
+    onOpenGuessTheMove:        () -> Unit = {},
+    onOpenGuessTheMoveWithGame: (Int) -> Unit = {},
     vm: HomeViewModel = koinViewModel(),
 ) {
-    val gameCount        by vm.gameCount.collectAsState()
-    val hasRecentSession by vm.hasRecentSession.collectAsState()
-    val recentGames      by vm.recentGames.collectAsState()
+    val gameCount          by vm.gameCount.collectAsState()
+    val hasRecentSession   by vm.hasRecentSession.collectAsState()
+    val recentGames        by vm.recentGames.collectAsState()
+    val masterGamePreviews by vm.masterGamePreviews.collectAsState()
     val appColors = LocalAppColors.current
 
     Scaffold(containerColor = appColors.background) { padding ->
@@ -160,6 +165,29 @@ fun HomeScreen(
                 }
             }
 
+            // ── Master games carousel ──────────────────────────────────────────
+            if (masterGamePreviews.isNotEmpty()) {
+                item {
+                    SectionLabel(
+                        text     = "MASTER GAMES",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(
+                        contentPadding        = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(masterGamePreviews, key = { it.index }) { game ->
+                            MasterGameCard(
+                                game    = game,
+                                onClick = { onOpenGuessTheMoveWithGame(game.index) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
+                }
+            }
+
             // ── Quick actions ──────────────────────────────────────────────────
             item {
                 SectionLabel(
@@ -190,6 +218,17 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                ActionCard(
+                    category = "TRAINING",
+                    title    = "Guess the Move",
+                    subtitle = "Match a grandmaster move by move",
+                    icon     = Icons.Outlined.EmojiObjects,
+                    onClick  = onOpenGuessTheMove,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth(),
+                )
                 Spacer(Modifier.height(10.dp))
                 SettingsCard(
                     onClick  = onOpenSettings,
@@ -456,6 +495,78 @@ private fun RecentGameCard(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text  = game.date.replace('.', '/'),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = appColors.textTertiary,
+                )
+            }
+        }
+    }
+}
+
+// ── Master game carousel card ─────────────────────────────────────────────────
+
+@Composable
+private fun MasterGameCard(
+    game:    MasterGamePreview,
+    onClick: () -> Unit,
+) {
+    val appColors = LocalAppColors.current
+    Card(
+        modifier = Modifier.width(160.dp),
+        colors   = CardDefaults.cardColors(containerColor = appColors.surface),
+        shape    = RoundedCornerShape(10.dp),
+        border   = BorderStroke(1.dp, ChessGold.copy(alpha = 0.30f)),
+        onClick  = onClick,
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector        = Icons.Outlined.Star,
+                    contentDescription = null,
+                    tint               = ChessGold,
+                    modifier           = Modifier.size(11.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text          = "MASTER",
+                    style         = MaterialTheme.typography.labelSmall,
+                    color         = ChessGold,
+                    letterSpacing = 0.8.sp,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text       = game.white.take(16),
+                style      = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = appColors.textPrimary,
+                maxLines   = 1,
+            )
+            Text(
+                text  = "vs",
+                style = MaterialTheme.typography.labelSmall,
+                color = appColors.textTertiary,
+            )
+            Text(
+                text       = game.black.take(16),
+                style      = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color      = appColors.textPrimary,
+                maxLines   = 1,
+            )
+            if (game.event.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text     = game.event,
+                    style    = MaterialTheme.typography.labelSmall,
+                    color    = appColors.textSecondary,
+                    maxLines = 2,
+                )
+            }
+            if (game.year.isNotBlank() && !game.year.startsWith("?")) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text  = game.year,
                     style = MaterialTheme.typography.labelSmall,
                     color = appColors.textTertiary,
                 )

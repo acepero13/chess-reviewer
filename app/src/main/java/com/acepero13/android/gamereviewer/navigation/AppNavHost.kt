@@ -15,6 +15,7 @@ import com.acepero13.android.gamereviewer.ui.screens.GameListScreen
 import com.acepero13.android.gamereviewer.ui.screens.GameReportScreen
 import com.acepero13.android.gamereviewer.ui.screens.HomeScreen
 import com.acepero13.android.gamereviewer.ui.screens.ImportScreen
+import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveScreen
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefScreen
 import com.acepero13.android.gamereviewer.ui.screens.SettingsScreen
 import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillScreen
@@ -36,6 +37,10 @@ sealed class Screen(val route: String) {
             "weakness_drill/${Uri.encode(categoryNames)}/${Uri.encode(drillTitle)}"
     }
     object SessionDebrief : Screen("session_debrief")
+    object GuessTheMove   : Screen("guess_the_move?gameIndex={gameIndex}") {
+        fun route(gameIndex: Int) = "guess_the_move?gameIndex=$gameIndex"
+        const val BASE = "guess_the_move"
+    }
 }
 
 @Composable
@@ -45,12 +50,27 @@ fun AppNavHost() {
     NavHost(navController = navController, startDestination = Screen.Home.route) {
         composable(Screen.Home.route) {
             HomeScreen(
-                onOpenGameList   = { navController.navigate(Screen.GameList.route) },
-                onOpenImport     = { navController.navigate(Screen.Import.route) },
-                onOpenDashboard  = { navController.navigate(Screen.Dashboard.route) },
-                onOpenSettings   = { navController.navigate(Screen.Settings.route) },
-                onOpenDebrief    = { navController.navigate(Screen.SessionDebrief.route) },
-                onOpenAnalysis   = { gameId -> navController.navigate(Screen.Analysis.route(gameId)) },
+                onOpenGameList    = { navController.navigate(Screen.GameList.route) },
+                onOpenImport      = { navController.navigate(Screen.Import.route) },
+                onOpenDashboard   = { navController.navigate(Screen.Dashboard.route) },
+                onOpenSettings    = { navController.navigate(Screen.Settings.route) },
+                onOpenDebrief     = { navController.navigate(Screen.SessionDebrief.route) },
+                onOpenAnalysis    = { gameId -> navController.navigate(Screen.Analysis.route(gameId)) },
+                onOpenGuessTheMove       = { navController.navigate(Screen.GuessTheMove.BASE) },
+                onOpenGuessTheMoveWithGame = { idx -> navController.navigate(Screen.GuessTheMove.route(idx)) },
+            )
+        }
+        composable(
+            route     = Screen.GuessTheMove.route,
+            arguments = listOf(navArgument("gameIndex") {
+                type         = NavType.IntType
+                defaultValue = -1
+            }),
+        ) { backStack ->
+            val gameIndex = backStack.arguments?.getInt("gameIndex") ?: -1
+            GuessTheMoveScreen(
+                onBack           = { navController.popBackStack() },
+                initialGameIndex = gameIndex,
             )
         }
         composable(Screen.GameList.route) {
