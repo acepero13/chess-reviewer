@@ -22,6 +22,8 @@ class SettingsRepository(private val context: Context) {
         private val KEY_POSITION_COACH = booleanPreferencesKey("position_coach_enabled")
         /** When true, a "Copy LLM Prompt" button appears next to active coaching panels. */
         private val KEY_DEVELOPER_MODE = booleanPreferencesKey("developer_mode_enabled")
+        /** Optional Lichess personal access token for the Masters opening explorer. */
+        private val KEY_LICHESS_TOKEN  = stringPreferencesKey("lichess_api_token")
     }
 
     val boardTheme: Flow<String> = context.dataStore.data.map { prefs ->
@@ -51,6 +53,11 @@ class SettingsRepository(private val context: Context) {
         prefs[KEY_DEVELOPER_MODE] ?: false
     }
 
+    /** Lichess personal access token — empty string means not configured. */
+    val lichessApiToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LICHESS_TOKEN] ?: ""
+    }
+
     suspend fun setBoardTheme(theme: String) {
         context.dataStore.edit { prefs -> prefs[KEY_BOARD_THEME] = theme }
     }
@@ -73,5 +80,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDeveloperModeEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[KEY_DEVELOPER_MODE] = enabled }
+    }
+
+    suspend fun setLichessApiToken(token: String) {
+        context.dataStore.edit { prefs -> prefs[KEY_LICHESS_TOKEN] = token.trim() }
     }
 }

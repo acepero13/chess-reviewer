@@ -1,6 +1,7 @@
 package com.acepero13.android.gamereviewer.ui.screens.analysis
 
 import com.acepero13.android.gamereviewer.ui.components.OpeningExplorerUiState
+import com.acepero13.chess.core.opening.ChessDbExplorer
 import com.acepero13.chess.core.opening.LichessMastersExplorer
 import com.acepero13.chess.core.opening.MoveFrequency
 import com.acepero13.chess.core.ui.board.Arrow
@@ -23,6 +24,7 @@ private val ARROW_COLORS = listOf(
 internal class OpeningExplorerController(
     private val scope: CoroutineScope,
     private val onArrowsChanged: (List<Arrow>) -> Unit,
+    private val lichessToken: () -> String? = { null },
 ) {
     private val _state = MutableStateFlow(OpeningExplorerUiState())
     val state: StateFlow<OpeningExplorerUiState> = _state.asStateFlow()
@@ -33,7 +35,7 @@ internal class OpeningExplorerController(
         activeJob?.cancel()
         activeJob = scope.launch(Dispatchers.IO) {
             _state.update { it.copy(loading = true, error = null) }
-            val result = runCatching { LichessMastersExplorer.query(fen) }.getOrNull()
+            val result = queryWithFallback(fen)
             val arrows = result?.moves
                 ?.take(3)
                 ?.mapIndexedNotNull { i, m -> m.toArrow(i) }
@@ -42,6 +44,10 @@ internal class OpeningExplorerController(
             onArrowsChanged(arrows)
         }
     }
+
+    private suspend fun queryWithFallback(fen: String) =
+        runCatching { LichessMastersExplorer.query(fen, lichessToken()) }.getOrNull()
+            ?: runCatching { ChessDbExplorer.query(fen) }.getOrNull()
 
     fun clear() {
         activeJob?.cancel()
