@@ -18,6 +18,8 @@ import com.acepero13.android.gamereviewer.ui.screens.ImportScreen
 import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveScreen
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefScreen
 import com.acepero13.android.gamereviewer.ui.screens.SettingsScreen
+import com.acepero13.android.gamereviewer.ui.screens.SnippetAnalysisScreen
+import com.acepero13.android.gamereviewer.ui.screens.SnippetLibraryScreen
 import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillScreen
 
 sealed class Screen(val route: String) {
@@ -41,6 +43,10 @@ sealed class Screen(val route: String) {
         fun route(gameIndex: Int) = "guess_the_move?gameIndex=$gameIndex"
         const val BASE = "guess_the_move"
     }
+    object SnippetLibrary : Screen("snippets")
+    object SnippetAnalysis : Screen("snippet/{snippetId}") {
+        fun route(snippetId: Long) = "snippet/$snippetId"
+    }
 }
 
 @Composable
@@ -56,8 +62,9 @@ fun AppNavHost() {
                 onOpenSettings    = { navController.navigate(Screen.Settings.route) },
                 onOpenDebrief     = { navController.navigate(Screen.SessionDebrief.route) },
                 onOpenAnalysis    = { gameId -> navController.navigate(Screen.Analysis.route(gameId)) },
-                onOpenGuessTheMove       = { navController.navigate(Screen.GuessTheMove.BASE) },
+                onOpenGuessTheMove         = { navController.navigate(Screen.GuessTheMove.BASE) },
                 onOpenGuessTheMoveWithGame = { idx -> navController.navigate(Screen.GuessTheMove.route(idx)) },
+                onOpenSnippetLibrary       = { navController.navigate(Screen.SnippetLibrary.route) },
             )
         }
         composable(
@@ -151,6 +158,25 @@ fun AppNavHost() {
                 onBack       = { navController.popBackStack() },
                 onStartDrill = { cats, title ->
                     navController.navigate(Screen.WeaknessDrill.route(cats, title))
+                },
+            )
+        }
+        composable(Screen.SnippetLibrary.route) {
+            SnippetLibraryScreen(
+                onBack         = { navController.popBackStack() },
+                onOpenSnippet  = { snippetId -> navController.navigate(Screen.SnippetAnalysis.route(snippetId)) },
+            )
+        }
+        composable(
+            route     = Screen.SnippetAnalysis.route,
+            arguments = listOf(navArgument("snippetId") { type = NavType.LongType }),
+        ) { backStack ->
+            val snippetId = backStack.arguments?.getLong("snippetId") ?: return@composable
+            SnippetAnalysisScreen(
+                snippetId          = snippetId,
+                onBack             = { navController.popBackStack() },
+                onOpenOriginalGame = { gameId, _ ->
+                    navController.navigate(Screen.Analysis.route(gameId))
                 },
             )
         }

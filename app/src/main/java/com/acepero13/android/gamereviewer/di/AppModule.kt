@@ -4,6 +4,7 @@ import androidx.room.Room
 import com.acepero13.android.gamereviewer.data.db.AppDatabase
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
+import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.EndgameRecognizer
 import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
@@ -20,6 +21,8 @@ import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
+import com.acepero13.android.gamereviewer.ui.screens.SnippetAnalysisViewModel
+import com.acepero13.android.gamereviewer.ui.screens.SnippetLibraryViewModel
 import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillViewModel
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
@@ -38,7 +41,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -49,11 +52,13 @@ val appModule = module {
     single { get<AppDatabase>().moveTimeDao() }
     single { get<AppDatabase>().endgameEncounterDao() }
     single { get<AppDatabase>().guessMoveSessionDao() }
+    single { get<AppDatabase>().snippetDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
     single { SettingsRepository(androidContext()) }
     single { TriggerMasteryRepository(androidContext()) }
+    single { SnippetRepository(get()) }
 
     // ── Chess-core singletons ─────────────────────────────────────────────────
     single { (androidApplication() as com.acepero13.android.gamereviewer.GameReviewerApp).stockfishEngine }
@@ -89,8 +94,11 @@ val appModule = module {
             deviationAnalyzer       = get(),
             endgameRecognizer       = get(),
             middlegamePlanDetector  = get(),
+            snippetRepo             = get(),
         )
     }
+    viewModel { SnippetLibraryViewModel(get()) }
+    viewModel { (snippetId: Long) -> SnippetAnalysisViewModel(snippetId, get()) }
     viewModel { (gameId: Long) ->
         GameReportViewModel(
             gameId            = gameId,
@@ -123,6 +131,7 @@ val appModule = module {
             dao           = get(),
             annotationDao = get(),
             engine        = get(),
+            snippetRepo   = get(),
         )
     }
     viewModel { (categoryNames: List<String>) ->

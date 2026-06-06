@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.Assessment
+import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -29,28 +31,49 @@ import com.acepero13.chess.core.ui.theme.LocalAppColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AnalysisTopBar(
-    state:        AnalysisUiState,
-    vm:           AnalysisViewModel,
-    gameId:       Long,
-    onBack:       () -> Unit,
-    onViewReport: (Long) -> Unit,
+    state:               AnalysisUiState,
+    vm:                  AnalysisViewModel,
+    gameId:              Long,
+    onBack:              () -> Unit,
+    onViewReport:        (Long) -> Unit,
+    snippetTitle:        String = "",
+    onOpenOriginalGame:  (() -> Unit)? = null,
 ) {
     val appColors = LocalAppColors.current
+    val isSnippetMode = snippetTitle.isNotBlank()
     TopAppBar(
         title = {
             Column {
-                state.game?.let { g ->
-                    Text("${g.whitePlayer} vs ${g.blackPlayer}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ChessGold)
-                }
-                if (state.openingSummary.isNotEmpty()) {
-                    val deviation = state.openingDeviation
-                    val summary   = if (deviation != null) "${state.openingSummary}  ·  left book: ${deviation.moveLabel}" else state.openingSummary
-                    Text(
-                        text     = summary,
-                        style    = MaterialTheme.typography.bodySmall,
-                        color    = if (deviation != null) ChessGold.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = if (deviation != null) Modifier.clickable { vm.goToMove(deviation.moveIndex) } else Modifier,
-                    )
+                if (isSnippetMode) {
+                    androidx.compose.foundation.layout.Row(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Outlined.Bookmark,
+                            contentDescription = null,
+                            tint               = ChessGold,
+                            modifier           = Modifier.size(14.dp),
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.size(5.dp))
+                        Text(snippetTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ChessGold)
+                    }
+                    state.game?.let { g ->
+                        Text("${g.whitePlayer} vs ${g.blackPlayer}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    state.game?.let { g ->
+                        Text("${g.whitePlayer} vs ${g.blackPlayer}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ChessGold)
+                    }
+                    if (state.openingSummary.isNotEmpty()) {
+                        val deviation = state.openingDeviation
+                        val summary   = if (deviation != null) "${state.openingSummary}  ·  left book: ${deviation.moveLabel}" else state.openingSummary
+                        Text(
+                            text     = summary,
+                            style    = MaterialTheme.typography.bodySmall,
+                            color    = if (deviation != null) ChessGold.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = if (deviation != null) Modifier.clickable { vm.goToMove(deviation.moveIndex) } else Modifier,
+                        )
+                    }
                 }
             }
         },
@@ -62,7 +85,11 @@ internal fun AnalysisTopBar(
             if (state.reviewMode == ReviewMode.MENTOR) {
                 Icon(Icons.Outlined.Lock, contentDescription = "Navigation frozen", tint = ChessGold, modifier = Modifier.padding(end = 16.dp).size(20.dp))
             }
-            if (state.isBackgroundAnalysisDone) {
+            if (isSnippetMode && onOpenOriginalGame != null) {
+                IconButton(onClick = onOpenOriginalGame) {
+                    Icon(Icons.Outlined.OpenInNew, contentDescription = "Open original game", tint = ChessGold)
+                }
+            } else if (state.isBackgroundAnalysisDone) {
                 IconButton(onClick = { onViewReport(gameId) }) {
                     Icon(Icons.Outlined.Assessment, contentDescription = "View full report", tint = ChessGold)
                 }

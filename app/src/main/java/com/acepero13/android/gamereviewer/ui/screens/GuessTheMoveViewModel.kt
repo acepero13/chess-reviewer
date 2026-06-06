@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.GuessMoveSessionDao
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
+import com.acepero13.android.gamereviewer.data.model.Snippet
+import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.domain.extractMoveAnnotations
 import com.acepero13.android.gamereviewer.domain.extractPreambleAnnotation
 import com.acepero13.android.gamereviewer.domain.pgnToUciMoves
@@ -42,6 +44,7 @@ class GuessTheMoveViewModel(
     private val dao: GuessMoveSessionDao,
     private val annotationDao: PositionAnnotationDao,
     private val engine: StockfishEngine,
+    private val snippetRepo: SnippetRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GuessTheMoveUiState())
@@ -412,6 +415,32 @@ class GuessTheMoveViewModel(
         val upTo = if (st.phase == GuessTheMovePhase.REVIEWING) allSanSequence.size else posIdx
         val anns = if (st.phase == GuessTheMovePhase.REVIEWING) st.moveAnnotations else emptyMap<Int, String>()
         _uiState.update { it.copy(treeItems = moveEngine.buildTreeItems(upTo, posIdx, allSanSequence, allFenSequence, anns)) }
+    }
+
+    // ── Snippet bookmarking ───────────────────────────────────────────────────
+
+    fun openBookmarkSheet()    { _uiState.update { it.copy(showBookmarkSheet = true) } }
+    fun dismissBookmarkSheet() { _uiState.update { it.copy(showBookmarkSheet = false) } }
+
+    fun saveSnippet(title: String, tags: String, notes: String) {
+        val st  = _uiState.value
+        val fen = st.boardState.fen
+        val moveIndex = when (st.phase) {
+            GuessTheMovePhase.MOVE_REVEALED -> st.currentMoveIndex
+            GuessTheMovePhase.REVIEWING     -> st.reviewIndex
+            else                            -> 0
+        }
+        dismissBookmarkSheet()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                snippetRepo.insert(Snippet(
+                    title = title.ifBlank { "Position at move ${moveIndex + 1}" },
+                    fen   = fen,
+                    tags  = tags,
+                    notes = notes,
+                ))
+            }.onFailure { Log.e(TAG, "saveSnippet failed", it) }
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

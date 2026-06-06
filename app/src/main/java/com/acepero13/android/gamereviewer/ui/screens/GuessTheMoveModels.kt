@@ -66,4 +66,5 @@ data class GuessTheMoveUiState(
     val fenHistory: List<String> = emptyList(),
     val masterSanHistory: List<String> = emptyList(),
     val reviewIndex: Int = 0,
+    val showBookmarkSheet: Boolean = false,
 )

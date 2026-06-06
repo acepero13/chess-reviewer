@@ -10,7 +10,10 @@ simulates a human coach by noticing blind spots in real time via an **Insight Re
 **.
 
 **IMPORTANT**: Every time you make a change in chess-core, you need to run a publishMaven task,
-otherwise, changes are not seen by the game reviwer app
+otherwise, changes are not seen by the game reviwer app.
+
+**IMPORTANT**: Try to keep code focused. Each class SHOULD have only one responsability and classes
+SHOULD NOT be longer than around 200 lines of code and methods should be shorter than 70 lines.
 
 ---
 

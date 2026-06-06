@@ -53,6 +53,7 @@ import com.acepero13.android.gamereviewer.ui.components.StatsSheet
 import com.acepero13.android.gamereviewer.ui.screens.analysis.AnalysisBottomBar
 import com.acepero13.android.gamereviewer.ui.screens.analysis.AnalysisBoardArea
 import com.acepero13.android.gamereviewer.ui.screens.analysis.AnalysisTopBar
+import com.acepero13.android.gamereviewer.ui.screens.analysis.BookmarkPositionSheet
 import com.acepero13.android.gamereviewer.ui.screens.analysis.MentorModePanel
 import com.acepero13.android.gamereviewer.ui.screens.analysis.MissedMomentBanner
 import com.acepero13.android.gamereviewer.ui.screens.analysis.NavigateModePanel
@@ -70,6 +71,8 @@ fun AnalysisScreen(
     onViewReport:          (Long) -> Unit = {},
     initialMoveIndex:      Int? = null,
     onInitialMoveConsumed: () -> Unit = {},
+    snippetTitle:          String = "",
+    onOpenOriginalGame:    (() -> Unit)? = null,
     vm:                    AnalysisViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state by vm.uiState.collectAsState()
@@ -86,14 +89,16 @@ fun AnalysisScreen(
         if (initialMoveIndex != null) { vm.goToMove(initialMoveIndex); onInitialMoveConsumed() }
     }
 
-    val sheetState    = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val devSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState        = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val devSheetState     = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val bookmarkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope    = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val context  = LocalContext.current
 
-    var showDevSheet  by remember { mutableStateOf(false) }
-    var devPromptText by remember { mutableStateOf("") }
+    var showDevSheet      by remember { mutableStateOf(false) }
+    var devPromptText     by remember { mutableStateOf("") }
+    var showBookmarkSheet by remember { mutableStateOf(false) }
 
     if (showDevSheet && devPromptText.isNotBlank()) {
         DevCoachPromptSheet(
@@ -115,6 +120,18 @@ fun AnalysisScreen(
             playerStats = state.playerStats,
             onDismiss   = vm::dismissStatsSheet,
             onNavigate  = { idx -> vm.dismissStatsSheet(); vm.onMoveNodeClick(idx.toLong()) },
+        )
+    }
+
+    if (showBookmarkSheet) {
+        BookmarkPositionSheet(
+            sheetState = bookmarkSheetState,
+            onSave     = { title, tags, notes ->
+                vm.bookmarkPosition(title, tags, notes)
+                showBookmarkSheet = false
+                scope.launch { snackbar.showSnackbar("Position bookmarked") }
+            },
+            onDismiss  = { showBookmarkSheet = false; scope.launch { bookmarkSheetState.hide() } },
         )
     }
 
@@ -142,8 +159,8 @@ fun AnalysisScreen(
     Scaffold(
         containerColor       = appColors.background,
         snackbarHost         = { SnackbarHost(snackbar) },
-        topBar               = { AnalysisTopBar(state, vm, gameId, onBack, onViewReport) },
-        bottomBar            = { AnalysisBottomBar(state, vm, snackbar, scope) },
+        topBar               = { AnalysisTopBar(state, vm, gameId, onBack, onViewReport, snippetTitle, onOpenOriginalGame) },
+        bottomBar            = { AnalysisBottomBar(state, vm, snackbar, scope, onBookmark = { showBookmarkSheet = true }) },
         floatingActionButton = {
             if (devPanelActive) {
                 SmallFloatingActionButton(

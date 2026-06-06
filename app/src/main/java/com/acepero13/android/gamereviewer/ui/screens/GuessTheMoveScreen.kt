@@ -37,10 +37,12 @@ import androidx.compose.material.icons.automirrored.outlined.LastPage
 import androidx.compose.material.icons.automirrored.outlined.NavigateBefore
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.FirstPage
+import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -80,6 +82,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.ui.components.ANNOTATION_COLORS
+import com.acepero13.android.gamereviewer.ui.screens.analysis.BookmarkPositionSheet
 import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.components.MoveTree
 import com.acepero13.chess.core.ui.theme.ChessGold
@@ -97,6 +100,7 @@ fun GuessTheMoveScreen(
     val state by vm.uiState.collectAsState()
     val appColors = LocalAppColors.current
     var showNotesDialog by remember { mutableStateOf(false) }
+    val bookmarkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(initialGameIndex) {
         if (initialGameIndex >= 0) vm.startWithGameAtIndex(initialGameIndex)
@@ -107,6 +111,14 @@ fun GuessTheMoveScreen(
             text         = state.currentUserComment,
             onTextChange = vm::updateUserComment,
             onDismiss    = { showNotesDialog = false },
+        )
+    }
+
+    if (state.showBookmarkSheet) {
+        BookmarkPositionSheet(
+            sheetState = bookmarkSheetState,
+            onSave     = { title, tags, notes -> vm.saveSnippet(title, tags, notes) },
+            onDismiss  = vm::dismissBookmarkSheet,
         )
     }
 
@@ -151,6 +163,16 @@ fun GuessTheMoveScreen(
                     }
                 },
                 actions = {
+                    if (state.phase == GuessTheMovePhase.MOVE_REVEALED ||
+                        state.phase == GuessTheMovePhase.REVIEWING) {
+                        IconButton(onClick = vm::openBookmarkSheet) {
+                            Icon(
+                                Icons.Outlined.Bookmark,
+                                contentDescription = "Bookmark position",
+                                tint = appColors.textSecondary,
+                            )
+                        }
+                    }
                     if (state.phase == GuessTheMovePhase.MOVE_REVEALED) {
                         IconButton(onClick = { showNotesDialog = true }) {
                             Icon(
@@ -1030,6 +1052,8 @@ private fun PreambleAnnotationCard(
     modifier:  Modifier = Modifier,
 ) {
     val appColors = LocalAppColors.current
+    var expanded by remember { mutableStateOf(false) }
+    var overflows by remember { mutableStateOf(false) }
     androidx.compose.material3.Card(
         modifier = modifier,
         colors   = androidx.compose.material3.CardDefaults.cardColors(containerColor = appColors.surface),
@@ -1063,11 +1087,21 @@ private fun PreambleAnnotationCard(
             Spacer(Modifier.height(2.dp))
             Text(
                 text,
-                style    = MaterialTheme.typography.bodySmall,
-                color    = appColors.textSecondary,
-                maxLines = 5,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                style        = MaterialTheme.typography.bodySmall,
+                color        = appColors.textSecondary,
+                maxLines     = if (expanded) Int.MAX_VALUE else 3,
+                overflow     = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
             )
+            if (overflows || expanded) {
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(
+                        if (expanded) "Show less" else "Show more",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ChessGold,
+                    )
+                }
+            }
         }
     }
 }
@@ -1077,30 +1111,43 @@ private fun PreambleAnnotationCard(
 @Composable
 private fun OpponentAnnotationCard(text: String, modifier: Modifier = Modifier) {
     val appColors = LocalAppColors.current
+    var expanded by remember { mutableStateOf(false) }
+    var overflows by remember { mutableStateOf(false) }
     androidx.compose.material3.Card(
         modifier = modifier,
         colors   = androidx.compose.material3.CardDefaults.cardColors(containerColor = appColors.surface),
         shape    = RoundedCornerShape(8.dp),
         border   = BorderStroke(1.dp, appColors.border.copy(alpha = 0.5f)),
     ) {
-        Row(
-            modifier          = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                Icons.Outlined.RateReview,
-                contentDescription = null,
-                tint     = appColors.textTertiary,
-                modifier = Modifier.size(14.dp).padding(top = 2.dp),
-            )
-            Text(
-                text,
-                style    = MaterialTheme.typography.bodySmall,
-                color    = appColors.textSecondary,
-                maxLines = 5,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                verticalAlignment      = Alignment.Top,
+                horizontalArrangement  = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.RateReview,
+                    contentDescription = null,
+                    tint     = appColors.textTertiary,
+                    modifier = Modifier.size(14.dp).padding(top = 2.dp),
+                )
+                Text(
+                    text,
+                    style        = MaterialTheme.typography.bodySmall,
+                    color        = appColors.textSecondary,
+                    maxLines     = if (expanded) Int.MAX_VALUE else 3,
+                    overflow     = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
+                )
+            }
+            if (overflows || expanded) {
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(
+                        if (expanded) "Show less" else "Show more",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ChessGold,
+                    )
+                }
+            }
         }
     }
 }

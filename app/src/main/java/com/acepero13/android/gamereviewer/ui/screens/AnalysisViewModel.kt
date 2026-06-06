@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
+import com.acepero13.android.gamereviewer.data.model.Snippet
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
+import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.EndgameRecognizer
 import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
@@ -46,6 +48,7 @@ import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
 import com.github.bhlangonijr.chesslib.Square
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -68,6 +71,7 @@ class AnalysisViewModel(
     private val deviationAnalyzer: OpeningDeviationAnalyzer,
     private val endgameRecognizer: EndgameRecognizer,
     private val middlegamePlanDetector: MiddlegamePlanDetector,
+    private val snippetRepo: SnippetRepository,
 ) : ViewModel() {
 
     private val session = GameSession(MutableStateFlow(AnalysisUiState()), viewModelScope, gameId)
@@ -219,4 +223,21 @@ class AnalysisViewModel(
 
     // Coach debug
     fun buildCoachEvalPrompt(): String?          = coachDebug.buildCoachEvalPrompt()
+
+    // Snippet Library
+    fun bookmarkPosition(title: String, tags: String, notes: String) {
+        val state = session.uiState.value
+        viewModelScope.launch(Dispatchers.IO) {
+            snippetRepo.insert(
+                Snippet(
+                    title        = title.ifBlank { "Position at move ${state.moveIndex}" },
+                    fen          = state.boardState.fen,
+                    sourceGameId = gameId,
+                    moveIndex    = state.moveIndex,
+                    tags         = tags,
+                    notes        = notes,
+                )
+            )
+        }
+    }
 }

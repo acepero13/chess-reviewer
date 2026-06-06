@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.EmojiObjects
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -24,10 +25,11 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun NavigateBottomBar(
-    state:    AnalysisUiState,
-    vm:       AnalysisViewModel,
-    snackbar: SnackbarHostState,
-    scope:    CoroutineScope,
+    state:      AnalysisUiState,
+    vm:         AnalysisViewModel,
+    snackbar:   SnackbarHostState,
+    scope:      CoroutineScope,
+    onBookmark: () -> Unit = {},
 ) {
     val analysisReady = state.isBackgroundAnalysisDone
     val onNotReady: () -> Unit = {
@@ -52,10 +54,10 @@ internal fun NavigateBottomBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment     = Alignment.CenterVertically,
     ) {
-        BottomBarButton(icon = Icons.Outlined.Flag,        label = "Critical", onClick = vm::markCurrentAsCritical, enabled = state.moveIndex > 0)
-        BottomBarButton(icon = Icons.Outlined.Search,      label = "Analyse",  onClick = vm::enterAnalyseMode)
-        BottomBarButton(icon = Icons.Outlined.BarChart,    label = "Stats",    onClick = vm::toggleStatsSheet,       enabled = analysisReady, onDisabledClick = if (!analysisReady) onNotReady else null)
-        BottomBarButton(icon = Icons.Outlined.Lightbulb,   label = "Coach",    onClick = vm::enterProactiveCoaching, enabled = hasActiveTrigger && analysisReady, selected = hasActiveTrigger && analysisReady, onDisabledClick = if (!analysisReady) onNotReady else null)
-        BottomBarButton(icon = Icons.Outlined.EmojiObjects, label = "Mentor",  onClick = vm::enterMentorSession,     enabled = analysisReady && state.criticalMoments.any { it.type == "ENGINE_MARKED" }, onDisabledClick = if (!analysisReady) onNotReady else null)
+        BottomBarButton(icon = Icons.Outlined.Flag,         label = "Critical", onClick = vm::markCurrentAsCritical, enabled = state.moveIndex > 0)
+        BottomBarButton(icon = Icons.Outlined.Search,       label = "Analyse",  onClick = vm::enterAnalyseMode)
+        BottomBarButton(icon = Icons.Outlined.Bookmark,     label = "Bookmark", onClick = { if (state.moveIndex >= 0) onBookmark() }, enabled = state.moveIndex >= 0)
+        BottomBarButton(icon = Icons.Outlined.BarChart,     label = "Stats",    onClick = vm::toggleStatsSheet,       enabled = analysisReady, onDisabledClick = if (!analysisReady) onNotReady else null)
+        BottomBarButton(icon = Icons.Outlined.EmojiObjects, label = "Mentor",   onClick = vm::enterMentorSession,     enabled = analysisReady && state.criticalMoments.any { it.type == "ENGINE_MARKED" }, onDisabledClick = if (!analysisReady) onNotReady else null)
     }
 }

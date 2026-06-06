@@ -21,10 +21,11 @@ import androidx.compose.ui.Modifier
 
 @Composable
 internal fun AnalysisBottomBar(
-    state:    AnalysisUiState,
-    vm:       AnalysisViewModel,
-    snackbar: SnackbarHostState,
-    scope:    CoroutineScope,
+    state:      AnalysisUiState,
+    vm:         AnalysisViewModel,
+    snackbar:   SnackbarHostState,
+    scope:      CoroutineScope,
+    onBookmark: () -> Unit = {},
 ) {
     val appColors = LocalAppColors.current
     Surface(color = appColors.surface, tonalElevation = 0.dp) {
@@ -36,7 +37,7 @@ internal fun AnalysisBottomBar(
                 label          = "bottomBar",
             ) { mode ->
                 when (mode) {
-                    ReviewMode.NAVIGATE -> NavigateBottomBar(state, vm, snackbar, scope)
+                    ReviewMode.NAVIGATE -> NavigateBottomBar(state, vm, snackbar, scope, onBookmark)
                     ReviewMode.ANALYSE  -> AnalyseBottomBar(state, vm)
                     ReviewMode.MENTOR   -> MentorBottomBar(state, vm)
                 }

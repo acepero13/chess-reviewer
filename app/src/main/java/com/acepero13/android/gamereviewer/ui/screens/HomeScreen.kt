@@ -26,6 +26,7 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.EmojiObjects
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.Insights
@@ -67,14 +68,15 @@ import androidx.compose.material.icons.outlined.Star
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    onOpenGameList:            () -> Unit,
-    onOpenImport:              () -> Unit,
-    onOpenDashboard:           () -> Unit = {},
-    onOpenSettings:            () -> Unit = {},
-    onOpenDebrief:             () -> Unit = {},
-    onOpenAnalysis:            (Long) -> Unit = {},
-    onOpenGuessTheMove:        () -> Unit = {},
+    onOpenGameList:             () -> Unit,
+    onOpenImport:               () -> Unit,
+    onOpenDashboard:            () -> Unit = {},
+    onOpenSettings:             () -> Unit = {},
+    onOpenDebrief:              () -> Unit = {},
+    onOpenAnalysis:             (Long) -> Unit = {},
+    onOpenGuessTheMove:         () -> Unit = {},
     onOpenGuessTheMoveWithGame: (Int) -> Unit = {},
+    onOpenSnippetLibrary:       () -> Unit = {},
     vm: HomeViewModel = koinViewModel(),
 ) {
     val gameCount          by vm.gameCount.collectAsState()
@@ -235,6 +237,17 @@ fun HomeScreen(
                     subtitle = "Match a grandmaster move by move",
                     icon     = Icons.Outlined.EmojiObjects,
                     onClick  = onOpenGuessTheMove,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                ActionCard(
+                    category = "STUDY",
+                    title    = "Snippet Library",
+                    subtitle = "Bookmarked positions for deep study",
+                    icon     = Icons.Outlined.Bookmark,
+                    onClick  = onOpenSnippetLibrary,
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
                         .fillMaxWidth(),

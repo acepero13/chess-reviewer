@@ -10,6 +10,7 @@ import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
+import com.acepero13.android.gamereviewer.data.model.Snippet
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.data.model.PositionAnnotation
 
@@ -31,6 +32,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   5 → added endgame_encounters table (endgame chapter recognition)
  *   6 → added pvLine column to game_evaluations (forcing sequence PV storage)
  *   7 → added guess_move_sessions table (Guess the Move training feature)
+ *   8 → added snippets table (Snippet Library feature)
  */
 @Database(
     entities    = [
@@ -41,8 +43,9 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         MoveTimeData::class,
         EndgameEncounter::class,
         GuessMoveSession::class,
+        Snippet::class,
     ],
-    version     = 7,
+    version     = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -53,6 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun moveTimeDao(): MoveTimeDao
     abstract fun endgameEncounterDao(): EndgameEncounterDao
     abstract fun guessMoveSessionDao(): GuessMoveSessionDao
+    abstract fun snippetDao(): SnippetDao
 
     companion object {
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -102,6 +106,25 @@ abstract class AppDatabase : RoomDatabase() {
                         exactMatches INTEGER NOT NULL,
                         guessingSide TEXT NOT NULL,
                         completedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS snippets (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        title TEXT NOT NULL,
+                        fen TEXT NOT NULL,
+                        sourceGameId INTEGER,
+                        moveIndex INTEGER NOT NULL DEFAULT 0,
+                        tags TEXT NOT NULL DEFAULT '',
+                        notes TEXT NOT NULL DEFAULT '',
+                        createdAt INTEGER NOT NULL
                     )
                     """.trimIndent()
                 )
