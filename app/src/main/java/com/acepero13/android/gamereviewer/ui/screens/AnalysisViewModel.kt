@@ -110,8 +110,11 @@ class AnalysisViewModel(
     private val sequenceBuilder  = GameSequenceBuilder(session, annotationDao)
     private val gameLoader       = GameLoaderController(session, repo, criticalMomentDao, settingsRepo, sequenceBuilder, analysisRunner, applicator, motifMapper, backgroundAnalysis)
 
+    private var _lichessToken: String = ""
+
     private val explorerController = OpeningExplorerController(
-        scope          = viewModelScope,
+        scope           = viewModelScope,
+        lichessToken    = { _lichessToken.ifBlank { null } },
         onArrowsChanged = { arrows ->
             if (session.uiState.value.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER) {
                 session.uiState.value = session.uiState.value.let { s ->
@@ -128,6 +131,9 @@ class AnalysisViewModel(
             if (session.uiState.value.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER) {
                 explorerController.load(fen)
             }
+        }
+        viewModelScope.launch {
+            settingsRepo.lichessApiToken.collect { _lichessToken = it }
         }
         gameLoader.loadGame()
     }
