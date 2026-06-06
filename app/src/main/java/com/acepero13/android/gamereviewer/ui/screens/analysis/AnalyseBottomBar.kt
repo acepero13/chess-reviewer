@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -53,6 +54,17 @@ internal fun AnalyseBottomBar(state: AnalysisUiState, vm: AnalysisViewModel) {
                     vm.exitSandboxMode()
                 else
                     vm.enterSandboxMode()
+            },
+        )
+        BottomBarButton(
+            icon     = Icons.AutoMirrored.Outlined.MenuBook,
+            label    = "Explorer",
+            selected = state.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER,
+            onClick  = {
+                if (state.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER)
+                    vm.exitExplorerMode()
+                else
+                    vm.enterExplorerMode()
             },
         )
     }

@@ -12,6 +12,8 @@ import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.domain.extractMoveAnnotations
 import com.acepero13.android.gamereviewer.domain.extractPreambleAnnotation
 import com.acepero13.android.gamereviewer.domain.pgnToUciMoves
+import com.acepero13.android.gamereviewer.ui.components.OpeningExplorerUiState
+import com.acepero13.android.gamereviewer.ui.screens.analysis.OpeningExplorerController
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.data.model.ChessConstants
 import com.acepero13.chess.core.data.model.PositionAnnotation
@@ -57,6 +59,12 @@ class GuessTheMoveViewModel(
     private var currentPostFen: String  = START_FEN
     private var allFenSequence: List<String> = listOf(START_FEN)
     private var allSanSequence: List<String> = emptyList()
+
+    private val explorerController = OpeningExplorerController(
+        scope           = viewModelScope,
+        onArrowsChanged = {},
+    )
+    val explorerState: StateFlow<OpeningExplorerUiState> = explorerController.state
 
     // ── Source selection ──────────────────────────────────────────────────────
 
@@ -234,6 +242,7 @@ class GuessTheMoveViewModel(
             )
         }
         rebuildTreeItems()
+        reloadExplorerIfActive(reveal.postFen)
     }
 
     private fun loadAnnotationsForFen(fen: String) {
@@ -366,13 +375,15 @@ class GuessTheMoveViewModel(
 
     fun reviewGoTo(index: Int) {
         val clamped = index.coerceIn(0, _uiState.value.fenHistory.lastIndex)
+        val newFen  = _uiState.value.fenHistory.getOrElse(clamped) { START_FEN }
         _uiState.update {
             it.copy(reviewIndex = clamped, boardState = it.boardState.copy(
-                fen = it.fenHistory.getOrElse(clamped) { START_FEN },
+                fen = newFen,
                 lastMove = moveEngine.resolveLastMove(it.fenHistory, it.masterMoves, clamped),
                 selectedSquare = null, legalMoves = emptyList()))
         }
         rebuildTreeItems()
+        reloadExplorerIfActive(newFen)
     }
 
     fun exitReview() { _uiState.update { it.copy(phase = GuessTheMovePhase.GAME_COMPLETE) } }
@@ -415,6 +426,19 @@ class GuessTheMoveViewModel(
         val upTo = if (st.phase == GuessTheMovePhase.REVIEWING) allSanSequence.size else posIdx
         val anns = if (st.phase == GuessTheMovePhase.REVIEWING) st.moveAnnotations else emptyMap<Int, String>()
         _uiState.update { it.copy(treeItems = moveEngine.buildTreeItems(upTo, posIdx, allSanSequence, allFenSequence, anns)) }
+    }
+
+    // ── Opening Explorer ──────────────────────────────────────────────────────
+
+    fun toggleExplorer() {
+        val nowShown = !_uiState.value.showExplorer
+        _uiState.update { it.copy(showExplorer = nowShown) }
+        if (nowShown) explorerController.load(_uiState.value.boardState.fen)
+        else explorerController.clear()
+    }
+
+    private fun reloadExplorerIfActive(fen: String) {
+        if (_uiState.value.showExplorer) explorerController.load(fen)
     }
 
     // ── Snippet bookmarking ───────────────────────────────────────────────────

@@ -16,6 +16,7 @@ internal class BoardStateApplicator(
     private val treeBuilder: MoveTreeBuilder,
     private val engineOverlay: EngineOverlayController,
 ) {
+    var onFenChanged: ((String) -> Unit)? = null
 
     fun applyMoveIndex(index: Int) {
         val fen      = session.fenSequence.getOrElse(index) { session.startFen }
@@ -47,6 +48,7 @@ internal class BoardStateApplicator(
         Log.d(TAG, "applyMoveIndex($index): fen=${fen.take(40)}")
         checkPostNavigationEffects(index)
         maybeRefreshEngineOverlays(fen)
+        onFenChanged?.invoke(fen)
     }
 
     private fun buildBoardState(index: Int, fen: String, annot: PositionAnnotation?): BoardState {

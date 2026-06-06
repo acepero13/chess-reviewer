@@ -18,7 +18,7 @@ import com.acepero13.chess.core.ui.components.TreeDisplayItem
 private const val START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 enum class ReviewMode { NAVIGATE, ANALYSE, MENTOR }
-enum class AnalyseSubMode { VIEW, EDIT, EXPLORE }
+enum class AnalyseSubMode { VIEW, EDIT, EXPLORE, OPENING_EXPLORER }
 enum class CoordinationQuizPhase { ASKING, REVEALING }
 enum class MentorMoveResult { CORRECT, CLOSE, INCORRECT }
 

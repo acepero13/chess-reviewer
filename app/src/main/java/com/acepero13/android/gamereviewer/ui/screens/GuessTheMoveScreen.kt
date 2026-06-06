@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.LastPage
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.NavigateBefore
 import androidx.compose.material.icons.automirrored.outlined.NavigateNext
 import androidx.compose.material.icons.outlined.FirstPage
@@ -82,6 +83,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.acepero13.android.gamereviewer.ui.components.ANNOTATION_COLORS
+import com.acepero13.android.gamereviewer.ui.components.OpeningExplorerPanel
 import com.acepero13.android.gamereviewer.ui.screens.analysis.BookmarkPositionSheet
 import com.acepero13.chess.core.ui.board.ChessBoard
 import com.acepero13.chess.core.ui.components.MoveTree
@@ -511,8 +513,10 @@ private fun GuessingContent(
     state: GuessTheMoveUiState,
     vm:    GuessTheMoveViewModel,
 ) {
-    val appColors = LocalAppColors.current
-    val engineArrows = if (state.engineArrow != null) listOf(state.engineArrow) else emptyList()
+    val appColors     = LocalAppColors.current
+    val explorerState by vm.explorerState.collectAsState()
+    val engineArrows  = if (state.engineArrow != null) listOf(state.engineArrow) else emptyList()
+    val allArrows     = engineArrows + if (state.showExplorer) explorerState.arrows else emptyList()
 
     Column(
         modifier = Modifier
@@ -530,7 +534,7 @@ private fun GuessingContent(
         // Board
         val displayBoardState = state.boardState.copy(
             isEditorMode = state.isEditorMode,
-            arrows       = engineArrows,
+            arrows       = allArrows,
         )
         ChessBoard(
             boardState     = displayBoardState,
@@ -540,7 +544,7 @@ private fun GuessingContent(
             modifier       = Modifier.fillMaxWidth(),
         )
 
-        // Controls row: Skip (guessing only) + Edit toggle
+        // Controls row: Skip (guessing only) + Edit toggle + Explorer toggle
         Row(
             modifier              = Modifier
                 .fillMaxWidth()
@@ -567,27 +571,57 @@ private fun GuessingContent(
                 Spacer(Modifier.weight(1f))
             }
 
-            OutlinedButton(
-                onClick = vm::toggleEditorMode,
-                border  = BorderStroke(
-                    1.dp,
-                    if (state.isEditorMode) ChessGold else appColors.border,
-                ),
-                colors  = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (state.isEditorMode) ChessGold.copy(alpha = 0.10f)
-                                     else Color.Transparent,
-                    contentColor   = if (state.isEditorMode) ChessGold else appColors.textSecondary,
-                ),
-                shape   = RoundedCornerShape(8.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.Brush,
-                    contentDescription = "Edit",
-                    modifier = Modifier.size(15.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Edit", style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = vm::toggleExplorer,
+                    border  = BorderStroke(1.dp, if (state.showExplorer) ChessGold else appColors.border),
+                    colors  = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (state.showExplorer) ChessGold.copy(alpha = 0.10f) else Color.Transparent,
+                        contentColor   = if (state.showExplorer) ChessGold else appColors.textSecondary,
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = "Explorer", modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Explorer", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = vm::toggleEditorMode,
+                    border  = BorderStroke(
+                        1.dp,
+                        if (state.isEditorMode) ChessGold else appColors.border,
+                    ),
+                    colors  = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (state.isEditorMode) ChessGold.copy(alpha = 0.10f)
+                                         else Color.Transparent,
+                        contentColor   = if (state.isEditorMode) ChessGold else appColors.textSecondary,
+                    ),
+                    shape   = RoundedCornerShape(8.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Brush,
+                        contentDescription = "Edit",
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Edit", style = MaterialTheme.typography.labelMedium)
+                }
             }
+        }
+
+        // Opening Explorer panel
+        AnimatedVisibility(
+            visible = state.showExplorer,
+            enter   = expandVertically() + fadeIn(),
+            exit    = shrinkVertically() + fadeOut(),
+        ) {
+            OpeningExplorerPanel(
+                state          = explorerState,
+                onMoveSelected = {},
+                modifier       = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
         }
 
         // Color picker — visible only when editor mode is active
@@ -915,9 +949,10 @@ private fun ReviewContent(
     state: GuessTheMoveUiState,
     vm:    GuessTheMoveViewModel,
 ) {
-    val appColors  = LocalAppColors.current
-    val totalSteps = state.fenHistory.lastIndex.coerceAtLeast(1)
-    val idx        = state.reviewIndex
+    val appColors     = LocalAppColors.current
+    val explorerState by vm.explorerState.collectAsState()
+    val totalSteps    = state.fenHistory.lastIndex.coerceAtLeast(1)
+    val idx           = state.reviewIndex
 
     val moveLabel = when {
         idx <= 0 -> "Starting position"
@@ -942,12 +977,30 @@ private fun ReviewContent(
         )
 
         ChessBoard(
-            boardState     = state.boardState.copy(isEditorMode = false),
+            boardState     = state.boardState.copy(
+                isEditorMode = false,
+                arrows       = if (state.showExplorer) explorerState.arrows else emptyList(),
+            ),
             onSquareTap    = {},
             onArrowDrawn   = { _, _ -> },
             onSquareMarked = {},
             modifier       = Modifier.fillMaxWidth(),
         )
+
+        // ── Opening Explorer panel ────────────────────────────────────────────
+        AnimatedVisibility(
+            visible = state.showExplorer,
+            enter   = expandVertically() + fadeIn(),
+            exit    = shrinkVertically() + fadeOut(),
+        ) {
+            OpeningExplorerPanel(
+                state          = explorerState,
+                onMoveSelected = {},
+                modifier       = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
 
         // ── Move breadcrumb tree ──────────────────────────────────────────────
         MoveTree(
@@ -1029,17 +1082,29 @@ private fun ReviewContent(
             color    = appColors.border,
         )
 
-        TextButton(
-            onClick  = vm::exitReview,
-            modifier = Modifier
+        Row(
+            modifier              = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically,
         ) {
-            Text(
-                "Back to Results",
-                style = MaterialTheme.typography.bodyMedium,
-                color = appColors.textSecondary,
-            )
+            TextButton(onClick = vm::exitReview) {
+                Text("Back to Results", style = MaterialTheme.typography.bodyMedium, color = appColors.textSecondary)
+            }
+            OutlinedButton(
+                onClick = vm::toggleExplorer,
+                border  = BorderStroke(1.dp, if (state.showExplorer) ChessGold else appColors.border),
+                colors  = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (state.showExplorer) ChessGold.copy(alpha = 0.10f) else Color.Transparent,
+                    contentColor   = if (state.showExplorer) ChessGold else appColors.textSecondary,
+                ),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.MenuBook, contentDescription = "Explorer", modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Explorer", style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }

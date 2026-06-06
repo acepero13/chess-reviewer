@@ -44,13 +44,25 @@ private fun EngineToggleChips(
 }
 
 @Composable
-fun AnalysePanel(state: AnalysisUiState, vm: AnalysisViewModel, modifier: Modifier = Modifier) {
+fun AnalysePanel(
+    state: AnalysisUiState,
+    vm: AnalysisViewModel,
+    explorerState: OpeningExplorerUiState = OpeningExplorerUiState(),
+    modifier: Modifier = Modifier,
+) {
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        EngineToggleChips(state.evalBarVisible, state.bestMoveVisible, vm::toggleEvalBar, vm::toggleBestMove)
+        if (state.analyseSubMode != AnalyseSubMode.OPENING_EXPLORER) {
+            EngineToggleChips(state.evalBarVisible, state.bestMoveVisible, vm::toggleEvalBar, vm::toggleBestMove)
+        }
         when (state.analyseSubMode) {
-            AnalyseSubMode.VIEW    -> ViewSubMode(state, vm)
-            AnalyseSubMode.EDIT    -> EditSubMode(state, vm)
-            AnalyseSubMode.EXPLORE -> ExploreSubMode(state, vm)
+            AnalyseSubMode.VIEW             -> ViewSubMode(state, vm)
+            AnalyseSubMode.EDIT             -> EditSubMode(state, vm)
+            AnalyseSubMode.EXPLORE          -> ExploreSubMode(state, vm)
+            AnalyseSubMode.OPENING_EXPLORER -> OpeningExplorerPanel(
+                state          = explorerState,
+                onMoveSelected = vm::onExplorerMoveSelected,
+                modifier       = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

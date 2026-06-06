@@ -76,7 +76,8 @@ fun AnalysisScreen(
     startInExploreMode:    Boolean = false,
     vm:                    AnalysisViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
-    val state by vm.uiState.collectAsState()
+    val state        by vm.uiState.collectAsState()
+    val explorerState by vm.explorerState.collectAsState()
 
     BackHandler(enabled = state.reviewMode != ReviewMode.NAVIGATE) {
         when (state.reviewMode) {
@@ -202,7 +203,7 @@ fun AnalysisScreen(
                 ) { mode ->
                     when (mode) {
                         ReviewMode.NAVIGATE -> NavigateModePanel(state, vm, onViewReport = { onViewReport(gameId) }, modifier = Modifier.fillMaxWidth())
-                        ReviewMode.ANALYSE  -> AnalysePanel(state, vm, modifier = Modifier.fillMaxWidth())
+                        ReviewMode.ANALYSE  -> AnalysePanel(state, vm, explorerState, modifier = Modifier.fillMaxWidth())
                         ReviewMode.MENTOR   -> MentorModePanel(state, vm, modifier = Modifier.fillMaxWidth())
                     }
                 }

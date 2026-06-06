@@ -43,10 +43,14 @@ import com.acepero13.android.gamereviewer.ui.screens.analysis.ReflectionControll
 import com.acepero13.android.gamereviewer.ui.screens.analysis.ReviewModeController
 import com.acepero13.android.gamereviewer.ui.screens.analysis.SandboxController
 import com.acepero13.android.gamereviewer.ui.screens.analysis.TruthMapRestorer
+import com.acepero13.android.gamereviewer.ui.components.OpeningExplorerUiState
+import com.acepero13.android.gamereviewer.ui.screens.analysis.OpeningExplorerController
 import com.acepero13.android.gamereviewer.ui.screens.analysis.UiDismissController
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
 import com.acepero13.chess.core.engine.StockfishEngine
 import com.acepero13.chess.core.opening.OpeningClassifier
+import com.acepero13.chess.core.util.ChessUtils
+import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Square
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -106,8 +110,25 @@ class AnalysisViewModel(
     private val sequenceBuilder  = GameSequenceBuilder(session, annotationDao)
     private val gameLoader       = GameLoaderController(session, repo, criticalMomentDao, settingsRepo, sequenceBuilder, analysisRunner, applicator, motifMapper, backgroundAnalysis)
 
+    private val explorerController = OpeningExplorerController(
+        scope          = viewModelScope,
+        onArrowsChanged = { arrows ->
+            if (session.uiState.value.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER) {
+                session.uiState.value = session.uiState.value.let { s ->
+                    s.copy(boardState = s.boardState.copy(arrows = arrows))
+                }
+            }
+        },
+    )
+    val explorerState: StateFlow<OpeningExplorerUiState> = explorerController.state
+
     init {
         sandbox.applyMoveIndexCallback = { index -> navigation.applyMoveIndex(index) }
+        applicator.onFenChanged = { fen ->
+            if (session.uiState.value.analyseSubMode == AnalyseSubMode.OPENING_EXPLORER) {
+                explorerController.load(fen)
+            }
+        }
         gameLoader.loadGame()
     }
 
@@ -223,6 +244,41 @@ class AnalysisViewModel(
 
     // Coach debug
     fun buildCoachEvalPrompt(): String?          = coachDebug.buildCoachEvalPrompt()
+
+    // Opening Explorer
+    fun enterExplorerMode() {
+        session.uiState.value = session.uiState.value.copy(
+            reviewMode     = ReviewMode.ANALYSE,
+            analyseSubMode = AnalyseSubMode.OPENING_EXPLORER,
+        )
+        explorerController.load(session.uiState.value.boardState.fen)
+    }
+
+    fun exitExplorerMode() {
+        explorerController.clear()
+        session.uiState.value = session.uiState.value.let { s ->
+            s.copy(
+                analyseSubMode = AnalyseSubMode.VIEW,
+                boardState     = s.boardState.copy(arrows = emptyList()),
+            )
+        }
+    }
+
+    fun onExplorerMoveSelected(uci: String) {
+        if (uci.length < 4) return
+        val currentFen = session.uiState.value.boardState.fen
+        val from = runCatching { Square.valueOf(uci.substring(0, 2).uppercase()) }.getOrNull() ?: return
+        val to   = runCatching { Square.valueOf(uci.substring(2, 4).uppercase()) }.getOrNull() ?: return
+        val board = Board().apply { loadFromFen(currentFen) }
+        val move  = ChessUtils.buildMove(board, from, to, null)
+        if (!board.legalMoves().contains(move)) return
+        board.doMove(move)
+        val newFen = board.fen
+        session.uiState.value = session.uiState.value.let { s ->
+            s.copy(boardState = s.boardState.copy(fen = newFen, lastMove = move, selectedSquare = null, legalMoves = emptyList()))
+        }
+        explorerController.load(newFen)
+    }
 
     // Snippet Library
     fun bookmarkPosition(title: String, tags: String, notes: String) {
