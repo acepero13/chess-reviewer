@@ -76,7 +76,7 @@ import com.acepero13.chess.core.ui.theme.boardColorsForTheme
 import org.koin.androidx.compose.koinViewModel
 
 // ── Board theme options ───────────────────────────────────────────────────────
-private val BOARD_THEMES = listOf("Classic", "Green", "Blue", "Walnut", "Midnight", "Coral")
+private val BOARD_THEMES = listOf("Classic", "Green", "Blue", "Walnut", "Midnight", "Coral", "Stone", "Wood", "Slate", "Citrine", "Ocean", "Sahara", "Crimson", "Pearl")
 
 // ── Piece style list: "Classic" (Unicode) + all EXTERNAL_THEMES ──────────────
 private val ALL_PIECE_STYLES: List<String> = listOf("Classic") + EXTERNAL_THEMES
