@@ -163,7 +163,8 @@ fun GuessTheMoveScreen(
                     }
                 },
                 actions = {
-                    if (state.phase == GuessTheMovePhase.MOVE_REVEALED ||
+                    if (state.phase == GuessTheMovePhase.GUESSING ||
+                        state.phase == GuessTheMovePhase.MOVE_REVEALED ||
                         state.phase == GuessTheMovePhase.REVIEWING) {
                         IconButton(onClick = vm::openBookmarkSheet) {
                             Icon(

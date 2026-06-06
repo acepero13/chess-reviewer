@@ -73,6 +73,7 @@ fun AnalysisScreen(
     onInitialMoveConsumed: () -> Unit = {},
     snippetTitle:          String = "",
     onOpenOriginalGame:    (() -> Unit)? = null,
+    startInExploreMode:    Boolean = false,
     vm:                    AnalysisViewModel = koinViewModel(parameters = { parametersOf(gameId) }),
 ) {
     val state by vm.uiState.collectAsState()
@@ -85,8 +86,9 @@ fun AnalysisScreen(
         }
     }
 
-    LaunchedEffect(initialMoveIndex) {
+    LaunchedEffect(initialMoveIndex, startInExploreMode) {
         if (initialMoveIndex != null) { vm.goToMove(initialMoveIndex); onInitialMoveConsumed() }
+        if (startInExploreMode) vm.setAnalyseSubMode(AnalyseSubMode.EXPLORE)
     }
 
     val sheetState        = rememberModalBottomSheetState(skipPartiallyExpanded = true)

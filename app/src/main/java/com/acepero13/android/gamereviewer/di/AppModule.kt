@@ -21,6 +21,7 @@ import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
+import com.acepero13.android.gamereviewer.ui.screens.OrphanSnippetViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SnippetAnalysisViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SnippetLibraryViewModel
 import com.acepero13.android.gamereviewer.ui.screens.WeaknessDrillViewModel
@@ -99,6 +100,7 @@ val appModule = module {
     }
     viewModel { SnippetLibraryViewModel(get()) }
     viewModel { (snippetId: Long) -> SnippetAnalysisViewModel(snippetId, get()) }
+    viewModel { (snippetId: Long) -> OrphanSnippetViewModel(snippetId, get(), get(), get()) }
     viewModel { (gameId: Long) ->
         GameReportViewModel(
             gameId            = gameId,
