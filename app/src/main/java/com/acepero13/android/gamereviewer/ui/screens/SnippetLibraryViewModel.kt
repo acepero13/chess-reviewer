@@ -51,6 +51,12 @@ class SnippetLibraryViewModel(
         viewModelScope.launch(Dispatchers.IO) { repo.delete(snippet) }
     }
 
+    fun updateSnippet(snippet: Snippet, title: String, tags: String, notes: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repo.update(snippet.copy(title = title.trim(), tags = tags.trim(), notes = notes.trim()))
+        }
+    }
+
     private fun applyTagFilter(snippets: List<Snippet>, tag: String?): List<Snippet> =
         if (tag == null) snippets else snippets.filter { tag in it.parsedTags() }
 }

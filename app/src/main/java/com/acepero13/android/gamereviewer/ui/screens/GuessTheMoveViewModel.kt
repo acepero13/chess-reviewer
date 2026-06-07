@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.acepero13.android.gamereviewer.data.db.GuessMoveSessionDao
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.Snippet
+import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.domain.extractMoveAnnotations
 import com.acepero13.android.gamereviewer.domain.extractPreambleAnnotation
@@ -47,6 +48,7 @@ class GuessTheMoveViewModel(
     private val annotationDao: PositionAnnotationDao,
     private val engine: StockfishEngine,
     private val snippetRepo: SnippetRepository,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GuessTheMoveUiState())
@@ -60,11 +62,18 @@ class GuessTheMoveViewModel(
     private var allFenSequence: List<String> = listOf(START_FEN)
     private var allSanSequence: List<String> = emptyList()
 
+    private var _lichessToken: String = ""
+
     private val explorerController = OpeningExplorerController(
         scope           = viewModelScope,
         onArrowsChanged = {},
+        lichessToken    = { _lichessToken.ifBlank { null } },
     )
     val explorerState: StateFlow<OpeningExplorerUiState> = explorerController.state
+
+    init {
+        viewModelScope.launch { settingsRepo.lichessApiToken.collect { _lichessToken = it } }
+    }
 
     // ── Source selection ──────────────────────────────────────────────────────
 
@@ -206,6 +215,7 @@ class GuessTheMoveViewModel(
         val st        = _uiState.value
         if (st.phase != GuessTheMovePhase.GUESSING) return
         val masterUci = st.masterMoves.getOrNull(st.currentMoveIndex) ?: return
+        saveUserAnnotation()
         val reveal    = moveEngine.computeSkipReveal(st.boardState.fen, masterUci)
         currentPostFen = reveal.postFen
         applyRevealState(reveal, isSkip = true, annotation = st.moveAnnotations[st.currentMoveIndex])
@@ -217,6 +227,7 @@ class GuessTheMoveViewModel(
     private fun submitUserMove(preFen: String, move: com.github.bhlangonijr.chesslib.move.Move) {
         val st        = _uiState.value
         val masterUci = st.masterMoves.getOrNull(st.currentMoveIndex) ?: return
+        saveUserAnnotation()
         val reveal    = moveEngine.computeMoveReveal(preFen, move, masterUci)
         currentPostFen = reveal.postFen
         applyRevealState(reveal, isSkip = false, annotation = st.moveAnnotations[st.currentMoveIndex])
@@ -314,9 +325,11 @@ class GuessTheMoveViewModel(
                 currentMoveIndex = nextIndex, phase = GuessTheMovePhase.GUESSING,
                 isEditorMode = false, originalAnnotation = null,
                 engineArrow = null, engineEvalCp = null, userMoveSan = "", masterMoveSan = "",
+                currentUserComment = "",
                 boardState = it.boardState.copy(selectedSquare = null, legalMoves = emptyList(), isEditorMode = false),
             )
         }
+        loadAnnotationsForFen(currentPostFen)
         maybeAutoAdvance(nextIndex, st.masterMoves, st.selectedSide)
     }
 
@@ -348,10 +361,12 @@ class GuessTheMoveViewModel(
             _uiState.update {
                 it.copy(currentMoveIndex = nextIndex, phase = GuessTheMovePhase.GUESSING,
                     isEditorMode = false, opponentAnnotation = _uiState.value.moveAnnotations[index],
+                    currentUserComment = "",
                     boardState = it.boardState.copy(fen = newFen, lastMove = masterMove,
                         selectedSquare = null, legalMoves = emptyList(), isEditorMode = false))
             }
             rebuildTreeItems()
+            loadAnnotationsForFen(newFen)
             maybeAutoAdvance(nextIndex, moves, side)
         }
     }

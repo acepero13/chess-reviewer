@@ -134,6 +134,7 @@ val appModule = module {
             annotationDao = get(),
             engine        = get(),
             snippetRepo   = get(),
+            settingsRepo  = get(),
         )
     }
     viewModel { (categoryNames: List<String>) ->

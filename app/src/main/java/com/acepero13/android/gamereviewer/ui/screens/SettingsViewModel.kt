@@ -43,6 +43,10 @@ class SettingsViewModel(
     val developerModeEnabled = repo.developerModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Lichess personal access token for the opening explorer. */
+    val lichessApiToken = repo.lichessApiToken
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
     /** Tracks whether the clear-all operation has just completed (for snackbar feedback). */
     private val _clearDone = MutableStateFlow(false)
     val clearDone = _clearDone.asStateFlow()
@@ -53,6 +57,7 @@ class SettingsViewModel(
     fun setUsername(name: String)              = viewModelScope.launch { repo.setUsername(name) }
     fun setPositionCoachEnabled(on: Boolean)   = viewModelScope.launch { repo.setPositionCoachEnabled(on) }
     fun setDeveloperModeEnabled(on: Boolean)   = viewModelScope.launch { repo.setDeveloperModeEnabled(on) }
+    fun setLichessApiToken(token: String)      = viewModelScope.launch { repo.setLichessApiToken(token) }
 
     /**
      * Deletes all imported games and their associated analysis data:

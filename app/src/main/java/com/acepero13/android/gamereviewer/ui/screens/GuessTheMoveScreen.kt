@@ -176,7 +176,8 @@ fun GuessTheMoveScreen(
                             )
                         }
                     }
-                    if (state.phase == GuessTheMovePhase.MOVE_REVEALED) {
+                    if (state.phase == GuessTheMovePhase.MOVE_REVEALED ||
+                        state.phase == GuessTheMovePhase.GUESSING) {
                         IconButton(onClick = { showNotesDialog = true }) {
                             Icon(
                                 Icons.Outlined.RateReview,

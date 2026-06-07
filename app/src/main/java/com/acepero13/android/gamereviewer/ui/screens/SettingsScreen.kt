@@ -62,6 +62,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -98,7 +100,10 @@ fun SettingsScreen(
     val savedUsername        by vm.username.collectAsState()
     val positionCoachEnabled by vm.positionCoachEnabled.collectAsState()
     val developerModeEnabled by vm.developerModeEnabled.collectAsState()
+    val savedLichessToken    by vm.lichessApiToken.collectAsState()
     var usernameInput by remember(savedUsername) { mutableStateOf(savedUsername) }
+    var lichessTokenInput by remember(savedLichessToken) { mutableStateOf(savedLichessToken) }
+    var tokenVisible by remember { mutableStateOf(false) }
 
     // Piece style search state
     var pieceSearch by remember { mutableStateOf("") }
@@ -227,6 +232,45 @@ fun SettingsScreen(
                         Text("Save", color = ChessGold)
                     }
                 }) else null,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Lichess API token — increases the rate limit for the Opening Explorer. " +
+                    "Generate one at lichess.org/account/oauth/token.",
+                style = MaterialTheme.typography.bodySmall,
+                color = appColors.textSecondary,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value         = lichessTokenInput,
+                onValueChange = { lichessTokenInput = it },
+                label         = { Text("Lichess API token (optional)") },
+                singleLine    = true,
+                visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                modifier      = Modifier.fillMaxWidth(),
+                shape         = RoundedCornerShape(8.dp),
+                colors        = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = ChessGold,
+                    unfocusedBorderColor = appColors.border,
+                    focusedLabelColor    = ChessGold,
+                    unfocusedLabelColor  = appColors.textSecondary,
+                    focusedTextColor     = appColors.textPrimary,
+                    unfocusedTextColor   = appColors.textPrimary,
+                    cursorColor          = ChessGold,
+                ),
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { tokenVisible = !tokenVisible }) {
+                            Text(if (tokenVisible) "Hide" else "Show", color = ChessGold)
+                        }
+                        if (lichessTokenInput != savedLichessToken) {
+                            TextButton(onClick = { vm.setLichessApiToken(lichessTokenInput) }) {
+                                Text("Save", color = ChessGold)
+                            }
+                        }
+                    }
+                },
             )
 
             Spacer(Modifier.height(24.dp))

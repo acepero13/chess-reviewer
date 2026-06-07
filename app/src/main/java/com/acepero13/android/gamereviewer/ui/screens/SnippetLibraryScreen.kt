@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.Bookmark
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -72,6 +73,15 @@ fun SnippetLibraryScreen(
     val appColors = LocalAppColors.current
 
     var snippetToDelete by remember { mutableStateOf<Snippet?>(null) }
+    var snippetToManage by remember { mutableStateOf<Snippet?>(null) }
+
+    snippetToManage?.let { snippet ->
+        SnippetManageSheet(
+            snippet   = snippet,
+            onDismiss = { snippetToManage = null },
+            onSave    = { title, tags, notes -> vm.updateSnippet(snippet, title, tags, notes) },
+        )
+    }
 
     snippetToDelete?.let { snippet ->
         AlertDialog(
@@ -144,6 +154,7 @@ fun SnippetLibraryScreen(
                             snippet  = snippet,
                             onClick  = { onOpenSnippet(snippet.id) },
                             onDelete = { snippetToDelete = snippet },
+                            onManage = { snippetToManage = snippet },
                         )
                     }
                 }
@@ -158,6 +169,7 @@ private fun SnippetCard(
     snippet:  Snippet,
     onClick:  () -> Unit,
     onDelete: () -> Unit,
+    onManage: () -> Unit,
 ) {
     val appColors = LocalAppColors.current
     val tags      = snippet.parsedTags()
@@ -197,6 +209,17 @@ private fun SnippetCard(
                         overflow   = TextOverflow.Ellipsis,
                         modifier   = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick  = onManage,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Outlined.Edit,
+                            contentDescription = "Manage",
+                            tint               = ChessGold.copy(alpha = 0.7f),
+                            modifier           = Modifier.size(18.dp),
+                        )
+                    }
                     IconButton(
                         onClick  = onDelete,
                         modifier = Modifier.size(32.dp),
