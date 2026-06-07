@@ -3,6 +3,7 @@ package com.acepero13.android.gamereviewer.ui.screens
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.acepero13.android.gamereviewer.data.db.GuessMoveProgressDao
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.domain.SessionDebrief
@@ -31,7 +32,11 @@ data class MasterGamePreview(
     val fen: String = START_FEN,
 )
 
-class HomeViewModel(repo: GameRepository, private val context: Context) : ViewModel() {
+class HomeViewModel(
+    repo: GameRepository,
+    private val context: Context,
+    private val progressDao: GuessMoveProgressDao,
+) : ViewModel() {
 
     val gameCount = repo.countAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -44,9 +49,28 @@ class HomeViewModel(repo: GameRepository, private val context: Context) : ViewMo
         .map { it.take(6) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val nextToReview: kotlinx.coroutines.flow.StateFlow<ReviewGame?> = repo.observeAll()
+        .map { games ->
+            games.filter { game ->
+                val total = game.movesUci.split(" ").count { it.isNotBlank() }
+                game.lastReviewedMoveIndex < total
+            }.maxByOrNull { game ->
+                val total = game.movesUci.split(" ").count { it.isNotBlank() }
+                if (total == 0) 0f else game.lastReviewedMoveIndex.toFloat() / total
+            } ?: games.firstOrNull()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     val masterGamePreviews = flow {
         val previews = withContext(Dispatchers.IO) { loadMasterGamePreviews() }
-        emit(previews)
+        val progressByIndex = withContext(Dispatchers.IO) {
+            runCatching { progressDao.getAll() }.getOrDefault(emptyList()).associateBy { it.gameIndex }
+        }
+        val sorted = previews.sortedByDescending { p ->
+            val prog = progressByIndex[p.index]
+            if (prog != null && prog.totalMoves > 0) prog.currentMoveIndex.toFloat() / prog.totalMoves else 0f
+        }
+        emit(sorted)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private fun loadMasterGamePreviews(): List<MasterGamePreview> = runCatching {

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +31,7 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -102,6 +104,16 @@ fun AnalysisScreen(
     var showDevSheet      by remember { mutableStateOf(false) }
     var devPromptText     by remember { mutableStateOf("") }
     var showBookmarkSheet by remember { mutableStateOf(false) }
+
+    state.pendingResumeFrom?.let { resumeIndex ->
+        AlertDialog(
+            onDismissRequest = vm::dismissResume,
+            title = { Text("Continue your review?") },
+            text  = { Text("You left off at move $resumeIndex. Resume from there or start over?") },
+            confirmButton = { TextButton(onClick = vm::confirmResume) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = vm::dismissResume) { Text("Start over") } },
+        )
+    }
 
     if (showDevSheet && devPromptText.isNotBlank()) {
         DevCoachPromptSheet(

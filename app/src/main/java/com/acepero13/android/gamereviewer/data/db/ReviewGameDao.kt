@@ -47,6 +47,9 @@ interface ReviewGameDao {
     @Query("SELECT * FROM review_games ORDER BY date ASC, importedAt ASC")
     suspend fun getAll(): List<ReviewGame>
 
+    @Query("UPDATE review_games SET lastReviewedMoveIndex = :idx WHERE id = :id")
+    suspend fun updateLastReviewedMoveIndex(id: Long, idx: Int)
+
     /** Wipe all imported games. Used by the "Clear all data" Settings action. */
     @Query("DELETE FROM review_games")
     suspend fun deleteAll()

@@ -2,8 +2,11 @@ package com.acepero13.android.gamereviewer.ui.screens.analysis
 
 import android.util.Log
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
+import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.ui.screens.ReviewMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -14,7 +17,10 @@ internal class NavigationController(
     private val session: GameSession,
     private val applicator: BoardStateApplicator,
     private val motifMapper: MotifMapper,
+    private val gameRepository: GameRepository,
 ) {
+
+    private var saveProgressJob: Job? = null
 
     fun goToMove(index: Int) {
         if (session.uiState.value.reviewMode == ReviewMode.MENTOR) {
@@ -25,6 +31,11 @@ internal class NavigationController(
         val prev    = session.uiState.value.moveIndex
         if (clamped > prev) checkMissedMoments(fromIndex = prev, toIndex = clamped)
         session.scope.launch(Dispatchers.Default) { applicator.applyMoveIndex(clamped) }
+        saveProgressJob?.cancel()
+        saveProgressJob = session.scope.launch(Dispatchers.IO) {
+            delay(500L)
+            gameRepository.updateLastReviewedMoveIndex(session.gameId, clamped)
+        }
     }
 
     fun stepForward()  = goToMove(session.uiState.value.moveIndex + 1)

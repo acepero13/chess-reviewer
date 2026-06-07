@@ -32,4 +32,7 @@ class GameRepository(private val dao: ReviewGameDao) {
     suspend fun getRecentGames(since: Long): List<ReviewGame> = dao.getRecentGames(since)
 
     fun countRecentGames(since: Long): Flow<Int> = dao.countRecentGames(since)
+
+    suspend fun updateLastReviewedMoveIndex(gameId: Long, idx: Int) =
+        dao.updateLastReviewedMoveIndex(gameId, idx)
 }

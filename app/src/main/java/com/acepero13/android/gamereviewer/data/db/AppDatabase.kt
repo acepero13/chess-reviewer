@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.EndgameEncounter
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
+import com.acepero13.android.gamereviewer.data.model.GuessMoveProgress
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
@@ -33,6 +34,8 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   6 → added pvLine column to game_evaluations (forcing sequence PV storage)
  *   7 → added guess_move_sessions table (Guess the Move training feature)
  *   8 → added snippets table (Snippet Library feature)
+ *   9 → added whitePlayer, blackPlayer columns to snippets
+ *  10 → added lastReviewedMoveIndex to review_games; added guess_move_progress table
  */
 @Database(
     entities    = [
@@ -44,8 +47,9 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         EndgameEncounter::class,
         GuessMoveSession::class,
         Snippet::class,
+        GuessMoveProgress::class,
     ],
-    version     = 8,
+    version     = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -57,6 +61,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun endgameEncounterDao(): EndgameEncounterDao
     abstract fun guessMoveSessionDao(): GuessMoveSessionDao
     abstract fun snippetDao(): SnippetDao
+    abstract fun guessMoveProgressDao(): GuessMoveProgressDao
 
     companion object {
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -125,6 +130,37 @@ abstract class AppDatabase : RoomDatabase() {
                         tags TEXT NOT NULL DEFAULT '',
                         notes TEXT NOT NULL DEFAULT '',
                         createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE snippets ADD COLUMN whitePlayer TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE snippets ADD COLUMN blackPlayer TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE review_games ADD COLUMN lastReviewedMoveIndex INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS guess_move_progress (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        gameIndex INTEGER NOT NULL,
+                        gameDescription TEXT NOT NULL,
+                        sourceLabel TEXT NOT NULL,
+                        currentMoveIndex INTEGER NOT NULL,
+                        totalMoves INTEGER NOT NULL,
+                        exactMatches INTEGER NOT NULL,
+                        totalPresented INTEGER NOT NULL,
+                        guessingSide TEXT NOT NULL,
+                        updatedAt INTEGER NOT NULL
                     )
                     """.trimIndent()
                 )

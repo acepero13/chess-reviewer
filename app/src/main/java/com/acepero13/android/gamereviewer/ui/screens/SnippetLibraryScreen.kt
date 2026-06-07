@@ -181,17 +181,40 @@ private fun SnippetCard(
         onClick  = onClick,
     ) {
         Row(modifier = Modifier.padding(12.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(RoundedCornerShape(6.dp)),
-            ) {
-                ChessBoard(
-                    boardState    = BoardState(fen = snippet.fen),
-                    onSquareTap   = {},
-                    modifier      = Modifier.fillMaxSize(),
-                    thumbnailMode = true,
-                )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                ) {
+                    ChessBoard(
+                        boardState    = BoardState(fen = snippet.fen),
+                        onSquareTap   = {},
+                        modifier      = Modifier.fillMaxSize(),
+                        thumbnailMode = true,
+                    )
+                }
+                if (snippet.whitePlayer.isNotBlank() || snippet.blackPlayer.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text      = snippet.whitePlayer.ifBlank { "?" },
+                        style     = MaterialTheme.typography.labelSmall,
+                        color     = appColors.textSecondary,
+                        maxLines  = 1,
+                        overflow  = TextOverflow.Ellipsis,
+                        modifier  = Modifier.width(88.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                    Text(
+                        text      = snippet.blackPlayer.ifBlank { "?" },
+                        style     = MaterialTheme.typography.labelSmall,
+                        color     = appColors.textTertiary,
+                        maxLines  = 1,
+                        overflow  = TextOverflow.Ellipsis,
+                        modifier  = Modifier.width(88.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {

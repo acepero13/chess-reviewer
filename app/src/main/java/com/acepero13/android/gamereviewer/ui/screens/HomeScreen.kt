@@ -82,6 +82,7 @@ fun HomeScreen(
     val gameCount          by vm.gameCount.collectAsState()
     val hasRecentSession   by vm.hasRecentSession.collectAsState()
     val recentGames        by vm.recentGames.collectAsState()
+    val nextToReview       by vm.nextToReview.collectAsState()
     val masterGamePreviews by vm.masterGamePreviews.collectAsState()
     val appColors = LocalAppColors.current
 
@@ -119,11 +120,11 @@ fun HomeScreen(
 
             // ── Next to review / onboarding ────────────────────────────────────
             item {
-                if (recentGames.isNotEmpty()) {
+                if (nextToReview != null) {
                     NextToReviewCard(
-                        game        = recentGames.first(),
+                        game        = nextToReview!!,
                         totalGames  = gameCount,
-                        onAnalyze   = { onOpenAnalysis(recentGames.first().id) },
+                        onAnalyze   = { onOpenAnalysis(nextToReview!!.id) },
                         onBrowseAll = onOpenGameList,
                         modifier    = Modifier
                             .padding(horizontal = 16.dp)

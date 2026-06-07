@@ -47,7 +47,11 @@ internal class GameLoaderController(
                 )
             }
             applicator.applyMoveIndex(0)
-            session.uiState.update { it.copy(showPredictionGate = true) }
+            if (game.lastReviewedMoveIndex > 0) {
+                session.uiState.update { it.copy(pendingResumeFrom = game.lastReviewedMoveIndex) }
+            } else {
+                session.uiState.update { it.copy(showPredictionGate = true) }
+            }
             backgroundAnalysis.launch(storedMoments)
         }
     }

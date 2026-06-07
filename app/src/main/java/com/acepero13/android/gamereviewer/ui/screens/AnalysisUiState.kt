@@ -184,4 +184,5 @@ data class AnalysisUiState(
     val calibrationLocked: Boolean = false,
     val calibrationFeedback: String = "",
     val calibrationFeedbackPositive: Boolean = false,
+    val pendingResumeFrom: Int? = null,
 )

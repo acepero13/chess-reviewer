@@ -24,4 +24,5 @@ data class ReviewGame(
     val sourceType: String,             // "file" | "chesscom" | "lichess"
     val sourceId: String = "",          // game ID on the platform if available
     val importedAt: Long = System.currentTimeMillis(),
+    val lastReviewedMoveIndex: Int = 0, // 0 = never opened; N = last confirmed position
 )

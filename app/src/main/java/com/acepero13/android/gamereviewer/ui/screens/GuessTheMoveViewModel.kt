@@ -5,7 +5,9 @@ import android.util.Log
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.acepero13.android.gamereviewer.data.db.GuessMoveProgressDao
 import com.acepero13.android.gamereviewer.data.db.GuessMoveSessionDao
+import com.acepero13.android.gamereviewer.data.model.GuessMoveProgress
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.Snippet
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
@@ -45,6 +47,7 @@ class GuessTheMoveViewModel(
     context: Context,
     importer: PgnImporter,
     private val dao: GuessMoveSessionDao,
+    private val progressDao: GuessMoveProgressDao,
     private val annotationDao: PositionAnnotationDao,
     private val engine: StockfishEngine,
     private val snippetRepo: SnippetRepository,
@@ -61,6 +64,7 @@ class GuessTheMoveViewModel(
     private var currentPostFen: String  = START_FEN
     private var allFenSequence: List<String> = listOf(START_FEN)
     private var allSanSequence: List<String> = emptyList()
+    private var currentGameIndex: Int = -1
 
     private var _lichessToken: String = ""
 
@@ -120,10 +124,20 @@ class GuessTheMoveViewModel(
     }
 
     fun startWithGameAtIndex(index: Int) {
-        val side = _uiState.value.selectedSide
-        _uiState.update { it.copy(phase = GuessTheMovePhase.LOADING, fetchError = null) }
         viewModelScope.launch(Dispatchers.IO) {
+            val existing = runCatching { progressDao.findByGameIndex(index) }.getOrNull()
+            if (existing != null) {
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(pendingResume = existing) }
+                }
+                return@launch
+            }
+            val side = _uiState.value.selectedSide
+            withContext(Dispatchers.Main) {
+                _uiState.update { it.copy(phase = GuessTheMovePhase.LOADING, fetchError = null) }
+            }
             runCatching {
+                currentGameIndex = index
                 startGameFromPgn(gameService.loadGameAtIndex(index), "Offline", side)
             }.onFailure { e ->
                 Log.e(TAG, "startWithGameAtIndex failed", e)
@@ -132,6 +146,51 @@ class GuessTheMoveViewModel(
                 }
             }
         }
+    }
+
+    fun confirmResume() {
+        val progress = _uiState.value.pendingResume ?: return
+        _uiState.update { it.copy(pendingResume = null, phase = GuessTheMovePhase.LOADING) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val side = GuessingSide.valueOf(progress.guessingSide)
+                currentGameIndex = progress.gameIndex
+                startGameFromPgn(gameService.loadGameAtIndex(progress.gameIndex), progress.sourceLabel, side)
+                val resumeFen = allFenSequence.getOrElse(progress.currentMoveIndex) { START_FEN }
+                currentPostFen = resumeFen
+                val masterMoves = _uiState.value.masterMoves
+                val lastMove = if (progress.currentMoveIndex > 0)
+                    moveEngine.resolveLastMove(allFenSequence, masterMoves, progress.currentMoveIndex)
+                else null
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(
+                            phase = GuessTheMovePhase.GUESSING,
+                            currentMoveIndex = progress.currentMoveIndex,
+                            exactMatches = progress.exactMatches,
+                            totalPresented = progress.totalPresented,
+                            boardState = it.boardState.copy(fen = resumeFen, lastMove = lastMove,
+                                selectedSquare = null, legalMoves = emptyList()),
+                        )
+                    }
+                    maybeAutoAdvance(progress.currentMoveIndex, masterMoves, side)
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "confirmResume failed", e)
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(phase = GuessTheMovePhase.SELECTING, fetchError = e.message ?: "Failed to resume") }
+                }
+            }
+        }
+    }
+
+    fun startFresh() {
+        val progress = _uiState.value.pendingResume ?: return
+        _uiState.update { it.copy(pendingResume = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { progressDao.deleteByGameIndex(progress.gameIndex) }
+        }
+        startWithGameAtIndex(progress.gameIndex)
     }
 
     private suspend fun startGameFromPgn(gameText: String, sourceLabel: String, side: GuessingSide) {
@@ -206,6 +265,10 @@ class GuessTheMoveViewModel(
 
     fun updateArrowColor(color: Color) { _uiState.update { it.copy(currentArrowColor = color) } }
 
+    fun clearDrawings() {
+        _uiState.update { it.copy(boardState = it.boardState.copy(userArrows = emptyList(), markedSquares = emptyList())) }
+    }
+
     fun toggleEditorMode() {
         val newMode = !_uiState.value.isEditorMode
         _uiState.update { it.copy(isEditorMode = newMode, boardState = it.boardState.copy(isEditorMode = newMode)) }
@@ -254,6 +317,8 @@ class GuessTheMoveViewModel(
         }
         rebuildTreeItems()
         reloadExplorerIfActive(reveal.postFen)
+        // Save progress pointing at the NEXT move so closing in MOVE_REVEALED resumes correctly
+        saveProgress(_uiState.value.currentMoveIndex + 1)
     }
 
     private fun loadAnnotationsForFen(fen: String) {
@@ -329,6 +394,7 @@ class GuessTheMoveViewModel(
                 boardState = it.boardState.copy(selectedSquare = null, legalMoves = emptyList(), isEditorMode = false),
             )
         }
+        saveProgress()
         loadAnnotationsForFen(currentPostFen)
         maybeAutoAdvance(nextIndex, st.masterMoves, st.selectedSide)
     }
@@ -413,6 +479,27 @@ class GuessTheMoveViewModel(
 
     // ── Persistence ───────────────────────────────────────────────────────────
 
+    private fun saveProgress(moveIndexOverride: Int? = null) {
+        if (currentGameIndex < 0) return
+        val st = _uiState.value
+        if (st.masterMoves.isEmpty()) return
+        val indexToSave = moveIndexOverride ?: st.currentMoveIndex
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                progressDao.upsert(GuessMoveProgress(
+                    gameIndex = currentGameIndex,
+                    gameDescription = st.gameDescription,
+                    sourceLabel = st.sourceLabel,
+                    currentMoveIndex = indexToSave,
+                    totalMoves = st.masterMoves.size,
+                    exactMatches = st.exactMatches,
+                    totalPresented = st.totalPresented,
+                    guessingSide = st.selectedSide.name,
+                ))
+            }.onFailure { Log.e(TAG, "saveProgress failed", it) }
+        }
+    }
+
     private fun saveSession() {
         val st = _uiState.value
         if (st.totalPresented == 0) return
@@ -421,6 +508,7 @@ class GuessTheMoveViewModel(
                 dao.insert(GuessMoveSession(gameDescription = st.gameDescription,
                     sourceLabel = st.sourceLabel, totalMoves = st.totalPresented,
                     exactMatches = st.exactMatches, guessingSide = st.selectedSide.name))
+                if (currentGameIndex >= 0) progressDao.deleteByGameIndex(currentGameIndex)
             }.onFailure { Log.e(TAG, "saveSession failed", it) }
         }
     }

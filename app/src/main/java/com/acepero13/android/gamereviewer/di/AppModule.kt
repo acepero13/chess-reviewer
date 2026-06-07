@@ -42,7 +42,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -54,6 +54,7 @@ val appModule = module {
     single { get<AppDatabase>().endgameEncounterDao() }
     single { get<AppDatabase>().guessMoveSessionDao() }
     single { get<AppDatabase>().snippetDao() }
+    single { get<AppDatabase>().guessMoveProgressDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -75,7 +76,7 @@ val appModule = module {
     single { MiddlegamePlanDetector(get()) }
 
     // ── ViewModels ────────────────────────────────────────────────────────────
-    viewModel { HomeViewModel(get(), androidContext()) }
+    viewModel { HomeViewModel(get(), androidContext(), get()) }
     viewModel { GameListViewModel(get(), get()) }
     viewModel { ImportViewModel(get(), get(), get(), get(), get()) }
     viewModel { (gameId: Long) ->
@@ -131,6 +132,7 @@ val appModule = module {
             context       = androidContext(),
             importer      = get(),
             dao           = get(),
+            progressDao   = get(),
             annotationDao = get(),
             engine        = get(),
             snippetRepo   = get(),

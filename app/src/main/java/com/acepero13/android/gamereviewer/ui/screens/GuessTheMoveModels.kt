@@ -1,6 +1,7 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
 import androidx.compose.ui.graphics.Color
+import com.acepero13.android.gamereviewer.data.model.GuessMoveProgress
 import com.acepero13.chess.core.ui.board.Arrow
 import com.acepero13.chess.core.ui.board.BoardState
 import com.acepero13.chess.core.ui.components.TreeDisplayItem
@@ -68,4 +69,5 @@ data class GuessTheMoveUiState(
     val reviewIndex: Int = 0,
     val showBookmarkSheet: Boolean = false,
     val showExplorer: Boolean = false,
+    val pendingResume: GuessMoveProgress? = null,
 )

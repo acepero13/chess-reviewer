@@ -85,7 +85,7 @@ class AnalysisViewModel(
     private val treeBuilder      = MoveTreeBuilder(session)
     private val engineOverlay    = EngineOverlayController(session, engine)
     private val applicator       = BoardStateApplicator(session, treeBuilder, engineOverlay)
-    private val navigation       = NavigationController(session, applicator, motifMapper)
+    private val navigation       = NavigationController(session, applicator, motifMapper, repo)
     private val annotation       = AnnotationController(session, annotationDao, treeBuilder)
     private val criticalMomentCtrl = CriticalMomentController(session, criticalMomentDao, annotationDao, treeBuilder, motifMapper)
     private val sandbox          = SandboxController(session, engine, engineOverlay)
@@ -136,6 +136,20 @@ class AnalysisViewModel(
             settingsRepo.lichessApiToken.collect { _lichessToken = it }
         }
         gameLoader.loadGame()
+    }
+
+    // Session resume
+    fun confirmResume() {
+        val idx = uiState.value.pendingResumeFrom ?: return
+        session.uiState.value = session.uiState.value.copy(pendingResumeFrom = null)
+        navigation.goToMove(idx)
+    }
+
+    fun dismissResume() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repo.updateLastReviewedMoveIndex(gameId, 0)
+        }
+        session.uiState.value = session.uiState.value.copy(pendingResumeFrom = null, showPredictionGate = true)
     }
 
     // Navigation
@@ -298,6 +312,8 @@ class AnalysisViewModel(
                     moveIndex    = state.moveIndex,
                     tags         = tags,
                     notes        = notes,
+                    whitePlayer  = state.game?.whitePlayer.orEmpty(),
+                    blackPlayer  = state.game?.blackPlayer.orEmpty(),
                 )
             )
         }

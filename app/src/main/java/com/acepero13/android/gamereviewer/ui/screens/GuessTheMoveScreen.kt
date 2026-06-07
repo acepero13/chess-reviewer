@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.automirrored.outlined.LastPage
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.NavigateBefore
@@ -121,6 +122,16 @@ fun GuessTheMoveScreen(
             sheetState = bookmarkSheetState,
             onSave     = { title, tags, notes -> vm.saveSnippet(title, tags, notes) },
             onDismiss  = vm::dismissBookmarkSheet,
+        )
+    }
+
+    state.pendingResume?.let { progress ->
+        AlertDialog(
+            onDismissRequest = vm::startFresh,
+            title = { Text("Continue where you left off?") },
+            text  = { Text("You stopped at move ${progress.currentMoveIndex + 1} of ${progress.totalMoves}. Resume from there?") },
+            confirmButton = { TextButton(onClick = vm::confirmResume) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = vm::startFresh) { Text("Start over") } },
         )
     }
 
@@ -632,23 +643,44 @@ private fun GuessingContent(
             exit    = shrinkVertically() + fadeOut(),
         ) {
             Row(
-                modifier              = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier              = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                Text(
-                    "Color:",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = appColors.textSecondary,
-                )
-                ANNOTATION_COLORS.forEach { color ->
-                    Box(
-                        modifier = Modifier
-                            .size(if (state.currentArrowColor == color) 22.dp else 18.dp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .clickable { vm.updateArrowColor(color) }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Color:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = appColors.textSecondary,
                     )
+                    ANNOTATION_COLORS.forEach { color ->
+                        Box(
+                            modifier = Modifier
+                                .size(if (state.currentArrowColor == color) 22.dp else 18.dp)
+                                .clip(CircleShape)
+                                .background(color)
+                                .clickable { vm.updateArrowColor(color) }
+                        )
+                    }
+                }
+                val hasDrawings = state.boardState.userArrows.isNotEmpty() || state.boardState.markedSquares.isNotEmpty()
+                if (hasDrawings) {
+                    IconButton(
+                        onClick  = vm::clearDrawings,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            contentDescription = "Clear arrows",
+                            tint     = appColors.textSecondary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }

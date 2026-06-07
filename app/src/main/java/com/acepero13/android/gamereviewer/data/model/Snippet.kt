@@ -13,6 +13,8 @@ data class Snippet(
     val tags: String = "",
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    val whitePlayer: String = "",
+    val blackPlayer: String = "",
 )
 
 fun Snippet.parsedTags(): List<String> =
