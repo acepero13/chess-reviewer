@@ -87,6 +87,7 @@ import com.acepero13.android.gamereviewer.ui.components.ANNOTATION_COLORS
 import com.acepero13.android.gamereviewer.ui.components.OpeningExplorerPanel
 import com.acepero13.android.gamereviewer.ui.screens.analysis.BookmarkPositionSheet
 import com.acepero13.chess.core.ui.board.ChessBoard
+import com.github.bhlangonijr.chesslib.Square
 import com.acepero13.chess.core.ui.components.MoveTree
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.CorrectGreen
@@ -544,15 +545,16 @@ private fun GuessingContent(
         )
 
         // Board
-        val displayBoardState = state.boardState.copy(
-            isEditorMode = state.isEditorMode,
-            arrows       = allArrows,
+        val isBrowsing = state.browseIndex != null
+        val displayBoardState = (state.browseBoardState ?: state.boardState).copy(
+            isEditorMode = if (isBrowsing) false else state.isEditorMode,
+            arrows       = if (isBrowsing) emptyList() else allArrows,
         )
         ChessBoard(
             boardState     = displayBoardState,
-            onSquareTap    = vm::onSquareTap,
-            onArrowDrawn   = vm::onArrowDrawn,
-            onSquareMarked = vm::onSquareMarked,
+            onSquareTap    = if (isBrowsing) { _: Square -> } else vm::onSquareTap,
+            onArrowDrawn   = if (isBrowsing) null else vm::onArrowDrawn,
+            onSquareMarked = if (isBrowsing) null else vm::onSquareMarked,
             modifier       = Modifier.fillMaxWidth(),
         )
 
@@ -564,7 +566,7 @@ private fun GuessingContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment     = Alignment.CenterVertically,
         ) {
-            if (state.phase == GuessTheMovePhase.GUESSING) {
+            if (state.phase == GuessTheMovePhase.GUESSING && state.browseIndex == null) {
                 TextButton(onClick = vm::skipMove) {
                     Icon(
                         Icons.Outlined.SkipNext,
@@ -685,15 +687,38 @@ private fun GuessingContent(
             }
         }
 
-        // Move tree breadcrumb (played moves so far — read-only during guessing)
+        // Move tree breadcrumb (played moves so far — navigable for review)
         if (state.treeItems.isNotEmpty()) {
             MoveTree(
                 entries     = state.treeItems,
-                onNodeClick = { /* read-only during guessing */ },
+                onNodeClick = vm::onBrowseNodeClick,
                 modifier    = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
             )
+        }
+        AnimatedVisibility(
+            visible = state.browseIndex != null,
+            enter   = expandVertically() + fadeIn(),
+            exit    = shrinkVertically() + fadeOut(),
+        ) {
+            TextButton(
+                onClick  = vm::exitBrowse,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint     = appColors.textSecondary,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Return to game",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = appColors.textSecondary,
+                )
+            }
         }
 
         // Preamble annotation card (game notes from the annotator)

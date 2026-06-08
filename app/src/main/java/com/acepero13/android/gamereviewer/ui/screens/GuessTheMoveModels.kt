@@ -67,6 +67,8 @@ data class GuessTheMoveUiState(
     val fenHistory: List<String> = emptyList(),
     val masterSanHistory: List<String> = emptyList(),
     val reviewIndex: Int = 0,
+    val browseIndex: Int? = null,
+    val browseBoardState: BoardState? = null,
     val showBookmarkSheet: Boolean = false,
     val showExplorer: Boolean = false,
     val pendingResume: GuessMoveProgress? = null,

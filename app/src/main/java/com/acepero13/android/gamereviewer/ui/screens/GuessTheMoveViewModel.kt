@@ -230,7 +230,7 @@ class GuessTheMoveViewModel(
 
     fun onSquareTap(square: Square) {
         val st = _uiState.value
-        if (st.phase != GuessTheMovePhase.GUESSING) return
+        if (st.phase != GuessTheMovePhase.GUESSING || st.browseIndex != null) return
         val cur      = st.boardState
         val selected = cur.selectedSquare
         if (selected == null) {
@@ -519,15 +519,40 @@ class GuessTheMoveViewModel(
         if (_uiState.value.phase == GuessTheMovePhase.REVIEWING) reviewGoTo(nodeId.toInt())
     }
 
+    fun onBrowseNodeClick(nodeId: Long) {
+        val st = _uiState.value
+        if (st.phase != GuessTheMovePhase.GUESSING && st.phase != GuessTheMovePhase.MOVE_REVEALED) return
+        val idx = nodeId.toInt()
+        val browseFen = allFenSequence.getOrElse(idx) { START_FEN }
+        val browseLastMove = moveEngine.resolveLastMove(allFenSequence, st.masterMoves, idx)
+        _uiState.update {
+            it.copy(
+                browseIndex = idx,
+                browseBoardState = it.boardState.copy(
+                    fen = browseFen, lastMove = browseLastMove,
+                    selectedSquare = null, legalMoves = emptyList(),
+                    userArrows = emptyList(), markedSquares = emptyList(), isEditorMode = false,
+                ),
+            )
+        }
+        rebuildTreeItems()
+    }
+
+    fun exitBrowse() {
+        _uiState.update { it.copy(browseIndex = null, browseBoardState = null) }
+        rebuildTreeItems()
+    }
+
     private fun rebuildTreeItems() {
-        val st     = _uiState.value
-        val posIdx = when (st.phase) {
+        val st      = _uiState.value
+        val gameIdx = when (st.phase) {
             GuessTheMovePhase.MOVE_REVEALED -> st.currentMoveIndex + 1
             GuessTheMovePhase.REVIEWING     -> st.reviewIndex
             else                            -> st.currentMoveIndex
         }
-        val upTo = if (st.phase == GuessTheMovePhase.REVIEWING) allSanSequence.size else posIdx
-        val anns = if (st.phase == GuessTheMovePhase.REVIEWING) st.moveAnnotations else emptyMap<Int, String>()
+        val posIdx = st.browseIndex ?: gameIdx
+        val upTo   = if (st.phase == GuessTheMovePhase.REVIEWING) allSanSequence.size else gameIdx
+        val anns   = if (st.phase == GuessTheMovePhase.REVIEWING) st.moveAnnotations else emptyMap<Int, String>()
         _uiState.update { it.copy(treeItems = moveEngine.buildTreeItems(upTo, posIdx, allSanSequence, allFenSequence, anns)) }
     }
 
