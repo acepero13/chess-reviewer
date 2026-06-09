@@ -12,7 +12,7 @@ interface GuessMoveProgressDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: GuessMoveProgress): Long
 
-    @Query("SELECT * FROM guess_move_progress WHERE gameIndex = :gameIndex LIMIT 1")
+    @Query("SELECT * FROM guess_move_progress WHERE gameIndex = :gameIndex ORDER BY id DESC LIMIT 1")
     suspend fun findByGameIndex(gameIndex: Int): GuessMoveProgress?
 
     @Query("DELETE FROM guess_move_progress WHERE gameIndex = :gameIndex")

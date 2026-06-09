@@ -547,14 +547,14 @@ private fun GuessingContent(
         // Board
         val isBrowsing = state.browseIndex != null
         val displayBoardState = (state.browseBoardState ?: state.boardState).copy(
-            isEditorMode = if (isBrowsing) false else state.isEditorMode,
+            isEditorMode = state.isEditorMode,
             arrows       = if (isBrowsing) emptyList() else allArrows,
         )
         ChessBoard(
             boardState     = displayBoardState,
             onSquareTap    = if (isBrowsing) { _: Square -> } else vm::onSquareTap,
-            onArrowDrawn   = if (isBrowsing) null else vm::onArrowDrawn,
-            onSquareMarked = if (isBrowsing) null else vm::onSquareMarked,
+            onArrowDrawn   = vm::onArrowDrawn,
+            onSquareMarked = vm::onSquareMarked,
             modifier       = Modifier.fillMaxWidth(),
         )
 
@@ -670,7 +670,8 @@ private fun GuessingContent(
                         )
                     }
                 }
-                val hasDrawings = state.boardState.userArrows.isNotEmpty() || state.boardState.markedSquares.isNotEmpty()
+                val activeBoard = if (isBrowsing) state.browseBoardState else state.boardState
+                val hasDrawings = activeBoard?.let { it.userArrows.isNotEmpty() || it.markedSquares.isNotEmpty() } == true
                 if (hasDrawings) {
                     IconButton(
                         onClick  = vm::clearDrawings,

@@ -250,28 +250,53 @@ class GuessTheMoveViewModel(
     }
 
     fun onArrowDrawn(from: Square, to: Square) {
-        val st      = _uiState.value
-        val updated = st.boardState.userArrows.toMutableList()
-        if (!updated.removeIf { it.from == from && it.to == to }) updated.add(Arrow(from, to, st.currentArrowColor))
-        _uiState.update { it.copy(boardState = st.boardState.copy(userArrows = updated)) }
+        val st = _uiState.value
+        if (st.browseIndex != null) {
+            val bs      = st.browseBoardState ?: return
+            val updated = bs.userArrows.toMutableList()
+            if (!updated.removeIf { it.from == from && it.to == to }) updated.add(Arrow(from, to, st.currentArrowColor))
+            _uiState.update { it.copy(browseBoardState = bs.copy(userArrows = updated)) }
+        } else {
+            val updated = st.boardState.userArrows.toMutableList()
+            if (!updated.removeIf { it.from == from && it.to == to }) updated.add(Arrow(from, to, st.currentArrowColor))
+            _uiState.update { it.copy(boardState = st.boardState.copy(userArrows = updated)) }
+        }
     }
 
     fun onSquareMarked(square: Square) {
-        val st      = _uiState.value
-        val updated = st.boardState.markedSquares.toMutableList()
-        if (!updated.removeIf { it.square == square }) updated.add(MarkedSquare(square, st.currentArrowColor))
-        _uiState.update { it.copy(boardState = st.boardState.copy(markedSquares = updated)) }
+        val st = _uiState.value
+        if (st.browseIndex != null) {
+            val bs      = st.browseBoardState ?: return
+            val updated = bs.markedSquares.toMutableList()
+            if (!updated.removeIf { it.square == square }) updated.add(MarkedSquare(square, st.currentArrowColor))
+            _uiState.update { it.copy(browseBoardState = bs.copy(markedSquares = updated)) }
+        } else {
+            val updated = st.boardState.markedSquares.toMutableList()
+            if (!updated.removeIf { it.square == square }) updated.add(MarkedSquare(square, st.currentArrowColor))
+            _uiState.update { it.copy(boardState = st.boardState.copy(markedSquares = updated)) }
+        }
     }
 
     fun updateArrowColor(color: Color) { _uiState.update { it.copy(currentArrowColor = color) } }
 
     fun clearDrawings() {
-        _uiState.update { it.copy(boardState = it.boardState.copy(userArrows = emptyList(), markedSquares = emptyList())) }
+        val st = _uiState.value
+        if (st.browseIndex != null) {
+            _uiState.update { it.copy(browseBoardState = it.browseBoardState?.copy(userArrows = emptyList(), markedSquares = emptyList())) }
+        } else {
+            _uiState.update { it.copy(boardState = it.boardState.copy(userArrows = emptyList(), markedSquares = emptyList())) }
+        }
     }
 
     fun toggleEditorMode() {
         val newMode = !_uiState.value.isEditorMode
-        _uiState.update { it.copy(isEditorMode = newMode, boardState = it.boardState.copy(isEditorMode = newMode)) }
+        _uiState.update {
+            it.copy(
+                isEditorMode     = newMode,
+                boardState       = it.boardState.copy(isEditorMode = newMode),
+                browseBoardState = it.browseBoardState?.copy(isEditorMode = newMode),
+            )
+        }
     }
 
     fun skipMove() {
@@ -486,6 +511,7 @@ class GuessTheMoveViewModel(
         val indexToSave = moveIndexOverride ?: st.currentMoveIndex
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
+                progressDao.deleteByGameIndex(currentGameIndex)
                 progressDao.upsert(GuessMoveProgress(
                     gameIndex = currentGameIndex,
                     gameDescription = st.gameDescription,
