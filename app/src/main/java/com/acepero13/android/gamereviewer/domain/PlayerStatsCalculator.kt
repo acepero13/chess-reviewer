@@ -22,7 +22,12 @@ object PlayerStatsCalculator {
     private fun winChance(cp: Int): Double =
         50.0 + 50.0 * (2.0 / (1.0 + exp(-0.00368208 * cp)) - 1.0)
 
-    private fun moveAccuracy(evalBeforeCp: Int, evalAfterCp: Int, isWhiteMove: Boolean): Float {
+    /**
+     * Accuracy (0–100) of a single move using the Lichess formula. Exposed so the
+     * cross-game stats ([GameStatsCalculator]) can compute per-phase accuracy without
+     * duplicating the win%/decay math.
+     */
+    fun moveAccuracy(evalBeforeCp: Int, evalAfterCp: Int, isWhiteMove: Boolean): Float {
         val prevSigned = if (isWhiteMove) evalBeforeCp else -evalBeforeCp
         val signed     = if (isWhiteMove) evalAfterCp  else -evalAfterCp
         val prevWin    = winChance(prevSigned)

@@ -10,7 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.acepero13.android.gamereviewer.ui.screens.AnalysisScreen
-import com.acepero13.android.gamereviewer.ui.screens.DashboardScreen
+import com.acepero13.android.gamereviewer.ui.screens.AnalyticsScreen
 import com.acepero13.android.gamereviewer.ui.screens.GameListScreen
 import com.acepero13.android.gamereviewer.ui.screens.GameReportScreen
 import com.acepero13.android.gamereviewer.ui.screens.HomeScreen
@@ -129,7 +129,7 @@ fun AppNavHost() {
             )
         }
         composable(Screen.Dashboard.route) {
-            DashboardScreen(
+            AnalyticsScreen(
                 onBack       = { navController.popBackStack() },
                 onStartDrill = { cats, title ->
                     navController.navigate(Screen.WeaknessDrill.route(cats, title))

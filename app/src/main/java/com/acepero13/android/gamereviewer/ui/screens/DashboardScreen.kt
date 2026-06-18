@@ -17,23 +17,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,14 +42,11 @@ import com.acepero13.android.gamereviewer.ui.components.ColorAsymmetryCard
 import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
 import com.acepero13.android.gamereviewer.ui.components.ImprovementTrajectoryCard
 import com.acepero13.android.gamereviewer.ui.components.OpeningDeviationConvergenceCard
-import com.acepero13.android.gamereviewer.ui.components.PhaseBreakdownCard
 import com.acepero13.android.gamereviewer.ui.components.PhaseFailureHeatmapCard
 import com.acepero13.android.gamereviewer.ui.components.SelfAwarenessTrendCard
 import com.acepero13.android.gamereviewer.ui.components.TopCoachTriggerCard
 import com.acepero13.android.gamereviewer.ui.components.VelocityConsistencyCard
 import com.acepero13.chess.core.ui.theme.ChessGold
-import com.acepero13.chess.core.ui.theme.LocalAppColors
-import org.koin.androidx.compose.koinViewModel
 
 /**
  * Cross-game Cognitive Diagnostic Dashboard (Task 4.3).
@@ -72,76 +61,37 @@ import org.koin.androidx.compose.koinViewModel
  *
  * All major sections are collapsible.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The Cognitive Dashboard content, hosted as a tab inside
+ * [com.acepero13.android.gamereviewer.ui.screens.AnalyticsScreen].
+ */
 @Composable
-fun DashboardScreen(
-    onBack:       () -> Unit,
+fun DashboardContent(
+    state:        DashboardUiState,
     onStartDrill: ((categoryNames: String, drillTitle: String) -> Unit)? = null,
-    vm:           DashboardViewModel = koinViewModel(),
+    modifier:     Modifier = Modifier,
 ) {
-    val state by vm.uiState.collectAsState()
-    val appColors = LocalAppColors.current
-
-    Scaffold(
-        containerColor = appColors.background,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "Cognitive Dashboard",
-                        style      = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color      = ChessGold,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Outlined.ArrowBackIosNew, "Back", tint = ChessGold)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = vm::refresh) {
-                        Icon(Icons.Outlined.Refresh, "Refresh", tint = ChessGold)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = appColors.background),
-            )
-        },
-    ) { padding ->
-        if (state.isLoading) {
-            Box(
-                modifier         = Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(color = ChessGold)
-            }
-            return@Scaffold
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+    if (state.isLoading) {
+        Box(
+            modifier         = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
+            CircularProgressIndicator(color = ChessGold)
+        }
+        return
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
 
             // ── Global stats ──────────────────────────────────────────────────
             CollapsibleSection(title = "Overview") {
                 GlobalStatsCard(state = state)
-            }
-
-            // ── Phase breakdown ───────────────────────────────────────────────
-            state.phaseBreakdown?.let { breakdown ->
-                if (breakdown.total > 0) {
-                    CollapsibleSection(title = "Phase Breakdown") {
-                        PhaseBreakdownCard(
-                            breakdown = breakdown,
-                            modifier  = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
             }
 
             // ── Wishful thinking warning ──────────────────────────────────────
@@ -365,12 +315,11 @@ fun DashboardScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-        }
     }
 }
 
 @Composable
-private fun CollapsibleSection(
+internal fun CollapsibleSection(
     title:   String,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
@@ -423,7 +372,6 @@ private fun GlobalStatsCard(state: DashboardUiState) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 StatColumn(label = "Games\nImported", value = "${state.totalGamesImported}")
-                StatColumn(label = "Games\nAnalysed", value = "${state.gamesAnalyzed}")
                 StatColumn(label = "Critical\nMoments",  value = "${state.totalCriticalMoments}")
             }
             if (state.habitRows.isNotEmpty()) {

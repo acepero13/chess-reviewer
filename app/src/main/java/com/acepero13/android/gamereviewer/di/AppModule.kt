@@ -18,6 +18,7 @@ import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameReportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.HomeViewModel
 import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
+import com.acepero13.android.gamereviewer.ui.screens.InsightsViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
@@ -42,7 +43,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -55,6 +56,7 @@ val appModule = module {
     single { get<AppDatabase>().guessMoveSessionDao() }
     single { get<AppDatabase>().snippetDao() }
     single { get<AppDatabase>().guessMoveProgressDao() }
+    single { get<AppDatabase>().gameStatsDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -123,6 +125,14 @@ val appModule = module {
             settingsRepo      = get(),
             moveTimeDao       = get(),
             openingClassifier = get(),
+        )
+    }
+    viewModel {
+        InsightsViewModel(
+            gameStatsDao      = get(),
+            criticalMomentDao = get(),
+            repo              = get(),
+            context           = androidContext(),
         )
     }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }

@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.model.EndgameEncounter
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
+import com.acepero13.android.gamereviewer.data.model.GameStats
 import com.acepero13.android.gamereviewer.data.model.GuessMoveProgress
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
@@ -36,6 +37,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   8 → added snippets table (Snippet Library feature)
  *   9 → added whitePlayer, blackPlayer columns to snippets
  *  10 → added lastReviewedMoveIndex to review_games; added guess_move_progress table
+ *  11 → added game_stats table (Insights: precomputed per-game Chess.com-style stats)
  */
 @Database(
     entities    = [
@@ -48,8 +50,9 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         GuessMoveSession::class,
         Snippet::class,
         GuessMoveProgress::class,
+        GameStats::class,
     ],
-    version     = 10,
+    version     = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -62,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun guessMoveSessionDao(): GuessMoveSessionDao
     abstract fun snippetDao(): SnippetDao
     abstract fun guessMoveProgressDao(): GuessMoveProgressDao
+    abstract fun gameStatsDao(): GameStatsDao
 
     companion object {
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -163,6 +167,40 @@ abstract class AppDatabase : RoomDatabase() {
                         updatedAt INTEGER NOT NULL
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS game_stats (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        gameId INTEGER NOT NULL,
+                        playerIsWhite INTEGER NOT NULL,
+                        accuracy REAL NOT NULL,
+                        acpl INTEGER NOT NULL,
+                        blunders INTEGER NOT NULL,
+                        mistakes INTEGER NOT NULL,
+                        inaccuracies INTEGER NOT NULL,
+                        openingAccuracy REAL NOT NULL,
+                        middlegameAccuracy REAL NOT NULL,
+                        endgameAccuracy REAL NOT NULL,
+                        middlegameAttackAccuracy REAL NOT NULL,
+                        middlegameDefenseAccuracy REAL NOT NULL,
+                        conversionAccuracy REAL NOT NULL,
+                        accuracyStdDev REAL NOT NULL,
+                        rushedBlunderRate REAL NOT NULL,
+                        openingEco TEXT NOT NULL DEFAULT '',
+                        openingName TEXT NOT NULL DEFAULT '',
+                        analysisDepth INTEGER NOT NULL,
+                        analyzedAt INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_game_stats_gameId ON game_stats(gameId)"
                 )
             }
         }

@@ -64,15 +64,6 @@ data class TopCoachTrigger(
     val tier:     Int,
 )
 
-data class PhaseBreakdown(
-    val opening:    Int,
-    val middlegame: Int,
-    val endgame:    Int,
-) {
-    val total: Int = opening + middlegame + endgame
-    fun fraction(count: Int): Float = if (total == 0) 0f else count.toFloat() / total
-}
-
 data class DashboardUiState(
     val isLoading: Boolean = true,
     val totalGamesImported: Int = 0,
@@ -82,7 +73,6 @@ data class DashboardUiState(
     val hasWishfulThinking: Boolean = false,
     val habitRows: List<HabitMasteryRow> = emptyList(),
     val endgameWeaknesses: List<EndgameWeaknessRow> = emptyList(),
-    val phaseBreakdown: PhaseBreakdown? = null,
     val topCoachTrigger: TopCoachTrigger? = null,
 
     // ── New insight fields ──────────────────────────────────────────────────────
@@ -103,15 +93,6 @@ data class DashboardUiState(
  * Loads all [CriticalMoment] records, runs [BehavioralDiagnostic.diagnose],
  * and exposes the top 3 failure trends plus all new cross-game insights.
  */
-private fun CriticalMoment.gamePhase(): String = when (toReason()) {
-    CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "opening"
-    CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "endgame"
-    else -> when {
-        moveIndex <= 15 -> "opening"
-        moveIndex <= 40 -> "middlegame"
-        else            -> "endgame"
-    }
-}
 
 class DashboardViewModel(
     private val repo: GameRepository,
@@ -176,12 +157,6 @@ class DashboardViewModel(
                         )
                     }
 
-                val phaseBreakdown = PhaseBreakdown(
-                    opening    = allMoments.count { it.gamePhase() == "opening" },
-                    middlegame = allMoments.count { it.gamePhase() == "middlegame" },
-                    endgame    = allMoments.count { it.gamePhase() == "endgame" },
-                )
-
                 val allEncounters = endgameEncounterDao.getAll()
                 val endgameWeaknesses = allEncounters
                     .groupBy { it.chapter }
@@ -233,7 +208,6 @@ class DashboardViewModel(
                         hasWishfulThinking     = wishful,
                         habitRows              = habitRows,
                         endgameWeaknesses      = endgameWeaknesses,
-                        phaseBreakdown         = phaseBreakdown,
                         topCoachTrigger        = topCoachTrigger,
                         selfAwarenessTrend     = selfAwarenessTrend,
                         colorAsymmetry         = colorAsymmetry,

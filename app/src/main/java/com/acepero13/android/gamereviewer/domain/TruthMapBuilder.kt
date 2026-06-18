@@ -24,12 +24,15 @@ class TruthMapBuilder(private val engine: StockfishEngine) {
      * Runs full game analysis.
      *
      * @param uciMoves  Space-separated or list of UCI moves from the starting position.
+     * @param depth     Search depth per position. Defaults to full analysis depth; the
+     *                  Insights batch pass passes a shallow depth (~12) for speed.
      * @param onProgress Called with (processedCount, total) after each position finishes.
      *                   Suitable for driving a hidden progress indicator.
      * @return List of [TruthMapEntry], one per half-move.
      */
     suspend fun build(
         uciMoves: List<String>,
+        depth: Int = ChessConstants.DEFAULT_ANALYSIS_DEPTH,
         onProgress: ((processed: Int, total: Int) -> Unit)? = null,
     ): List<TruthMapEntry> {
         val entries = mutableListOf<TruthMapEntry>()
@@ -38,7 +41,7 @@ class TruthMapBuilder(private val engine: StockfishEngine) {
 
         // Baseline eval at the starting position
         val startResult = runCatching {
-            engine.analyzePosition(board.fen, ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+            engine.analyzePosition(board.fen, depth)
         }.getOrNull()
         var prevEvalCp = startResult?.toWhitePerspective(board) ?: 0
 
@@ -50,7 +53,7 @@ class TruthMapBuilder(private val engine: StockfishEngine) {
             board.doMove(move)
 
             val result = runCatching {
-                engine.analyzePosition(board.fen, ChessConstants.DEFAULT_ANALYSIS_DEPTH)
+                engine.analyzePosition(board.fen, depth)
             }.getOrNull()
 
             val evalCp = result?.toWhitePerspective(board) ?: prevEvalCp

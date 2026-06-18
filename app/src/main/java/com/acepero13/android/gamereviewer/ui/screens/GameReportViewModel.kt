@@ -398,14 +398,8 @@ class GameReportViewModel(
         }.getOrNull()
     }
 
-    private fun assessFromCpl(cpl: Int): String = when {
-        cpl == 0    -> "Best Move"
-        cpl <= 10   -> "Excellent"
-        cpl <= 25   -> "Good Move"
-        cpl <= 50   -> "Inaccuracy"
-        cpl <= 100  -> "Mistake"
-        else        -> "Blunder"
-    }
+    private fun assessFromCpl(cpl: Int): String =
+        com.acepero13.android.gamereviewer.domain.MoveClassifier.label(cpl)
 
     private fun uciToMove(board: Board, uci: String): Move? {
         if (uci.length < 4) return null
