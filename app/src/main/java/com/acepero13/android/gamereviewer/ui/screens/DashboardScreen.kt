@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.BehavioralProfileCard
+import com.acepero13.android.gamereviewer.ui.components.TrainingPlanCard
 import com.acepero13.android.gamereviewer.ui.components.ColorAsymmetryCard
 import com.acepero13.android.gamereviewer.ui.components.HabitProgressCard
 import com.acepero13.android.gamereviewer.ui.components.ImprovementTrajectoryCard
@@ -339,6 +340,25 @@ fun DashboardScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // ── Training Plan ──────────────────────────────────────────────────
+            if (state.trainingRecommendations.isNotEmpty()) {
+                CollapsibleSection(title = "Your Training Plan") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text  = "Targeted exercises recommended based on your failure patterns.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                        state.trainingRecommendations.forEach { rec ->
+                            TrainingPlanCard(
+                                recommendation = rec,
+                                modifier       = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
                 }

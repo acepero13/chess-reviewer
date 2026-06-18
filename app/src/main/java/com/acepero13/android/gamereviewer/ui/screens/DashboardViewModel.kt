@@ -11,6 +11,8 @@ import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
+import com.acepero13.android.gamereviewer.domain.TrainingPlanRecommender
+import com.acepero13.android.gamereviewer.domain.TrainingRecommendation
 import com.acepero13.android.gamereviewer.domain.ColorAsymmetryAnalyzer
 import com.acepero13.android.gamereviewer.domain.ColorAsymmetry
 import com.acepero13.android.gamereviewer.domain.CoachingTrigger
@@ -90,6 +92,7 @@ data class DashboardUiState(
     val velocityConsistency: VelocityConsistency? = null,
     val improvementTrajectory: ImprovementTrajectory? = null,
     val openingDeviationRows: List<EcoDeviationRow> = emptyList(),
+    val trainingRecommendations: List<TrainingRecommendation> = emptyList(),
 
     val error: String? = null,
 )
@@ -139,6 +142,7 @@ class DashboardViewModel(
 
                 val trends  = BehavioralDiagnostic.diagnose(allMoments, topN = 3)
                 val wishful = BehavioralDiagnostic.hasWishfulThinking(allMoments)
+                val trainingPlan = TrainingPlanRecommender.recommend(trends)
 
                 val streaks   = masteryRepo.streaks.first()
                 val habitRows = CoachingTrigger.ALL_LABELS.map { label ->
@@ -236,7 +240,8 @@ class DashboardViewModel(
                         phaseFailureHeatmap    = phaseHeatmap,
                         velocityConsistency    = velocityConsistency,
                         improvementTrajectory  = improvementTrajectory,
-                        openingDeviationRows   = deviationRows,
+                        openingDeviationRows     = deviationRows,
+                        trainingRecommendations  = trainingPlan,
                     )
                 }
             } catch (e: Exception) {
