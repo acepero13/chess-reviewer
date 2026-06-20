@@ -36,12 +36,29 @@ data class InsightsUiState(
     val endgameAccuracy: Float = 0f,
     val attackAccuracy: Float = 0f,
     val defenseAccuracy: Float = 0f,
+    // Move time distribution (avg seconds; 0 = no clock data).
+    val avgTimeWinningSec: Float = 0f,
+    val avgTimeLosingSec: Float = 0f,
+    // Engine correlation in sharp vs quiet positions (0–100% best-move rate).
+    val sharpCorrelation: Float = 0f,
+    val quietCorrelation: Float = 0f,
+    // Oversight recovery (0–100% of moves right after an inaccuracy that were best).
+    val recoveryRate: Float = 0f,
+    val oversightCount: Int = 0,
+    val motifWeaknesses: List<MotifWeakness> = emptyList(),
+    val pawnStructures: List<StructureAccuracy> = emptyList(),
     val profile: PlayerProfile? = null,
     val phaseBreakdown: PhaseBreakdown? = null,
     val analysisInProgress: Boolean = false,
     val progressDone: Int = 0,
     val progressTotal: Int = 0,
 )
+
+/** A recurring weakness type and how often it has cost the user, for the motif-frequency card. */
+data class MotifWeakness(val label: String, val count: Int)
+
+/** Average accuracy in games of a given pawn structure. */
+data class StructureAccuracy(val label: String, val accuracy: Float, val games: Int)
 
 /** Distribution of critical moments across the three game phases. */
 data class PhaseBreakdown(
@@ -62,6 +79,18 @@ private fun CriticalMoment.gamePhase(): String = when (toReason()) {
         moveIndex <= 40 -> "middlegame"
         else            -> "endgame"
     }
+}
+
+/** Human-readable label for a critical-moment reason category, for the weakness breakdown. */
+private fun CriticalMoment.ReasonCategory.label(): String = when (this) {
+    CriticalMoment.ReasonCategory.MISSED_TACTIC     -> "Missed tactics"
+    CriticalMoment.ReasonCategory.OPENING_DEVIATION -> "Opening deviations"
+    CriticalMoment.ReasonCategory.HANGING_PIECE     -> "Hanging pieces"
+    CriticalMoment.ReasonCategory.KING_SAFETY       -> "King safety"
+    CriticalMoment.ReasonCategory.ENDGAME_PRINCIPLE -> "Endgame technique"
+    CriticalMoment.ReasonCategory.STRATEGIC_MISTAKE -> "Strategic errors"
+    CriticalMoment.ReasonCategory.TIME_PRESSURE     -> "Time pressure"
+    CriticalMoment.ReasonCategory.MISSED_WIN        -> "Missed wins"
 }
 
 /**
@@ -101,6 +130,35 @@ class InsightsViewModel(
             fun phaseAvg(selector: (com.acepero13.android.gamereviewer.data.model.GameStats) -> Float): Float =
                 stats.map(selector).filter { it > 0f }.let { if (it.isEmpty()) 0f else it.average().toFloat() }
 
+            // ── New Insights metrics ────────────────────────────────────────────
+            // Engine correlation (weighted across games by move counts).
+            val sharpTotal = stats.sumOf { it.sharpMoveCount }
+            val quietTotal = stats.sumOf { it.quietMoveCount }
+            val sharpCorrelation = if (sharpTotal == 0) 0f else 100f * stats.sumOf { it.sharpBestMoves } / sharpTotal
+            val quietCorrelation = if (quietTotal == 0) 0f else 100f * stats.sumOf { it.quietBestMoves } / quietTotal
+
+            // Oversight recovery (weighted by number of oversights).
+            val oversightTotal = stats.sumOf { it.oversightCount }
+            val recoveryRate = if (oversightTotal == 0) 0f else 100f * stats.sumOf { it.oversightRecovered } / oversightTotal
+
+            // Recurring weaknesses: critical-moment categories merged with engine-motif blunders.
+            val weaknessCounts = linkedMapOf<String, Int>()
+            moments.groupingBy { it.toReason().label() }.eachCount()
+                .forEach { (label, n) -> weaknessCounts.merge(label, n, Int::plus) }
+            stats.sumOf { it.forkBlunders }.takeIf { it > 0 }?.let { weaknessCounts.merge("Forks", it, Int::plus) }
+            stats.sumOf { it.hangingBlunders }.takeIf { it > 0 }
+                ?.let { weaknessCounts.merge("Hanging pieces", it, Int::plus) }
+            val motifWeaknesses = weaknessCounts.entries
+                .sortedByDescending { it.value }.take(6)
+                .map { MotifWeakness(it.key, it.value) }
+
+            // Pawn structure accuracy.
+            val pawnStructures = stats
+                .filter { it.pawnStructure.isNotBlank() }
+                .groupBy { it.pawnStructure }
+                .map { (label, gs) -> StructureAccuracy(label, gs.map { g -> g.accuracy }.average().toFloat(), gs.size) }
+                .sortedByDescending { it.games }
+
             _uiState.update {
                 it.copy(
                     isLoading          = false,
@@ -117,6 +175,14 @@ class InsightsViewModel(
                     endgameAccuracy    = phaseAvg { s -> s.endgameAccuracy },
                     attackAccuracy     = phaseAvg { s -> s.middlegameAttackAccuracy },
                     defenseAccuracy    = phaseAvg { s -> s.middlegameDefenseAccuracy },
+                    avgTimeWinningSec  = phaseAvg { s -> s.avgTimeWinningSec },
+                    avgTimeLosingSec   = phaseAvg { s -> s.avgTimeLosingSec },
+                    sharpCorrelation   = sharpCorrelation,
+                    quietCorrelation   = quietCorrelation,
+                    recoveryRate       = recoveryRate,
+                    oversightCount     = oversightTotal,
+                    motifWeaknesses    = motifWeaknesses,
+                    pawnStructures     = pawnStructures,
                     profile            = profile,
                     phaseBreakdown     = phaseBreakdown,
                 )

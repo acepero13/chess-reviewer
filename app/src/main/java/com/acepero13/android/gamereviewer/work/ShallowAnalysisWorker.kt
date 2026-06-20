@@ -17,6 +17,8 @@ import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
+import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
+import com.acepero13.android.gamereviewer.domain.PawnStructureTagger
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
 import kotlinx.coroutines.flow.first
 import org.koin.core.component.KoinComponent
@@ -45,9 +47,12 @@ class ShallowAnalysisWorker(
     private val gameStatsDao: GameStatsDao by inject()
     private val truthMapBuilder: TruthMapBuilder by inject()
     private val settingsRepo: SettingsRepository by inject()
+    private val middlegamePlanDetector: MiddlegamePlanDetector by inject()
+
+    private val pawnStructureTagger by lazy { PawnStructureTagger(middlegamePlanDetector) }
 
     override suspend fun doWork(): Result {
-        val pending = gameStatsDao.gameIdsWithoutStats()
+        val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION)
         if (pending.isEmpty()) return Result.success()
 
         runCatching { setForeground(foregroundInfo(0, pending.size)) }
@@ -64,11 +69,12 @@ class ShallowAnalysisWorker(
     private suspend fun analyzeGame(gameId: Long, username: String) {
         val game = repo.findById(gameId) ?: return
 
+        val uci = game.movesUci.split(' ').filter { it.isNotBlank() }
+
         // Reuse already-stored evaluations when present; otherwise run the shallow pass.
         var evaluations = gameEvaluationDao.getByGameId(gameId)
         val ranShallowPass = evaluations.isEmpty()
         if (ranShallowPass) {
-            val uci = game.movesUci.split(' ').filter { it.isNotBlank() }
             if (uci.isEmpty()) return
             val map = truthMapBuilder.build(uci, depth = SHALLOW_DEPTH)
             evaluations = map.map { e ->
@@ -83,6 +89,10 @@ class ShallowAnalysisWorker(
         if (evaluations.isEmpty()) return
 
         val moveTimes = moveTimeDao.getByGameId(gameId)
+        val playerIsWhite = GameStatsCalculator.playerIsWhite(game, username)
+        val pawnStructure = runCatching {
+            pawnStructureTagger.tag(uci, playerIsWhite)
+        }.getOrDefault("")
         val stats = GameStatsCalculator.compute(
             game = game,
             evaluations = evaluations,
@@ -90,6 +100,7 @@ class ShallowAnalysisWorker(
             username = username,
             // Reused evals were produced by the full in-app analysis pass.
             analysisDepth = if (ranShallowPass) SHALLOW_DEPTH else com.acepero13.chess.core.data.model.ChessConstants.DEFAULT_ANALYSIS_DEPTH,
+            pawnStructure = pawnStructure,
         )
         gameStatsDao.upsert(stats)
     }

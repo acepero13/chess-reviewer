@@ -34,10 +34,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.ui.components.AccuracyStatsCard
 import com.acepero13.android.gamereviewer.ui.components.AnalysisProgressCard
+import com.acepero13.android.gamereviewer.ui.components.EngineCorrelationCard
+import com.acepero13.android.gamereviewer.ui.components.MotifWeaknessCard
+import com.acepero13.android.gamereviewer.ui.components.MoveTimeDistributionCard
+import com.acepero13.android.gamereviewer.ui.components.PawnStructureCard
 import com.acepero13.android.gamereviewer.ui.components.PhaseAccuracyCard
 import com.acepero13.android.gamereviewer.ui.components.PhaseBreakdownCard
 import com.acepero13.android.gamereviewer.ui.components.PlayerStyleCard
 import com.acepero13.android.gamereviewer.ui.components.RadarChartCard
+import com.acepero13.android.gamereviewer.ui.components.RecoveryRateCard
 import com.acepero13.chess.core.ui.theme.ChessGold
 import com.acepero13.chess.core.ui.theme.LocalAppColors
 import org.koin.androidx.compose.koinViewModel
@@ -166,6 +171,34 @@ private fun InsightsContent(
             defenseAccuracy    = state.defenseAccuracy,
             modifier           = Modifier.fillMaxWidth(),
         )
+
+        if (state.avgTimeWinningSec > 0f || state.avgTimeLosingSec > 0f) {
+            MoveTimeDistributionCard(
+                winningSec = state.avgTimeWinningSec,
+                losingSec  = state.avgTimeLosingSec,
+                modifier   = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (state.sharpCorrelation > 0f || state.quietCorrelation > 0f) {
+            EngineCorrelationCard(
+                sharpCorrelation = state.sharpCorrelation,
+                quietCorrelation = state.quietCorrelation,
+                modifier         = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (state.oversightCount > 0) {
+            RecoveryRateCard(
+                recoveryRate   = state.recoveryRate,
+                oversightCount = state.oversightCount,
+                modifier       = Modifier.fillMaxWidth(),
+            )
+        }
+
+        MotifWeaknessCard(items = state.motifWeaknesses, modifier = Modifier.fillMaxWidth())
+
+        PawnStructureCard(items = state.pawnStructures, modifier = Modifier.fillMaxWidth())
 
         state.phaseBreakdown?.let { breakdown ->
             if (breakdown.total > 0) {

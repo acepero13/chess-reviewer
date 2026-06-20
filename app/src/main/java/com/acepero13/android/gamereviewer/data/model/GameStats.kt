@@ -42,8 +42,34 @@ data class GameStats(
     val accuracyStdDev: Float,
     /** Rate of rushed blunders (fast move that lost material), 0–1. */
     val rushedBlunderRate: Float,
+
+    // ── Move Time Distribution (winning vs losing) ──────────────────────────────
+    /** Average seconds spent per move while in a clearly winning position (0 = no clock data). */
+    val avgTimeWinningSec: Float = 0f,
+    /** Average seconds spent per move while in a clearly losing position (0 = no clock data). */
+    val avgTimeLosingSec: Float = 0f,
+
+    // ── Engine correlation in sharp vs quiet positions ──────────────────────────
+    val sharpMoveCount: Int = 0,
+    val sharpBestMoves: Int = 0,
+    val quietMoveCount: Int = 0,
+    val quietBestMoves: Int = 0,
+
+    // ── Recurring motif frequency (engine-motif blunders) ───────────────────────
+    val forkBlunders: Int = 0,
+    val hangingBlunders: Int = 0,
+
+    // ── Oversight recovery (best moves immediately after an inaccuracy+) ─────────
+    val oversightCount: Int = 0,
+    val oversightRecovered: Int = 0,
+
+    /** Dominant middlegame pawn-structure label (e.g. "Isolated Queen's Pawn"), "" if none. */
+    val pawnStructure: String = "",
+
     val openingEco: String = "",
     val openingName: String = "",
     val analysisDepth: Int,
+    /** Schema version of the computed metrics; bumped to force a (free) recompute. */
+    val statsVersion: Int = 0,
     val analyzedAt: Long = System.currentTimeMillis(),
 )

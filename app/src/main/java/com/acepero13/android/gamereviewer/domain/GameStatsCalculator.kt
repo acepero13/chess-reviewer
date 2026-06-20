@@ -30,18 +30,28 @@ object GameStatsCalculator {
      * @param username the player's handle (from SettingsRepository). When it matches neither
      *                 side (or is blank) the user is assumed to be White.
      */
+    /** Bumped whenever the set/definition of computed metrics changes — forces a free recompute. */
+    const val STATS_VERSION = 1
+
+    /**
+     * Which side the user played. When [username] matches neither side (or is blank) the user is
+     * assumed to be White, matching the [GameStats] default.
+     */
+    fun playerIsWhite(game: ReviewGame, username: String): Boolean = when {
+        game.blackPlayer.equals(username.trim(), ignoreCase = true) &&
+            !game.whitePlayer.equals(username.trim(), ignoreCase = true) -> false
+        else -> true
+    }
+
     fun compute(
         game: ReviewGame,
         evaluations: List<GameEvaluation>,
         moveTimes: List<MoveTimeData>,
         username: String,
         analysisDepth: Int,
+        pawnStructure: String,
     ): GameStats {
-        val playerIsWhite = when {
-            game.blackPlayer.equals(username.trim(), ignoreCase = true) &&
-                !game.whitePlayer.equals(username.trim(), ignoreCase = true) -> false
-            else -> true
-        }
+        val playerIsWhite = playerIsWhite(game, username)
 
         // The user's own moves: White plays odd half-moves, Black plays even.
         val parity = if (playerIsWhite) 1 else 0
@@ -54,14 +64,25 @@ object GameStatsCalculator {
         val acpl = if (cpls.isEmpty()) 0 else cpls.average().toInt()
 
         var blunders = 0; var mistakes = 0; var inaccuracies = 0
-        cpls.forEach { cpl ->
-            when (MoveClassifier.classify(cpl)) {
-                MoveClassifier.Quality.BLUNDER    -> blunders++
+        var forkBlunders = 0; var hangingBlunders = 0
+        userEvals.forEach { ev ->
+            when (MoveClassifier.classify(cplOf(ev, playerIsWhite))) {
+                MoveClassifier.Quality.BLUNDER -> {
+                    blunders++
+                    when (ev.motif) {
+                        "fork"    -> forkBlunders++
+                        "hanging" -> hangingBlunders++
+                    }
+                }
                 MoveClassifier.Quality.MISTAKE    -> mistakes++
                 MoveClassifier.Quality.INACCURACY -> inaccuracies++
                 else -> {}
             }
         }
+
+        val timeDist    = MoveTimeDistribution.compute(userEvals, moveTimes, playerIsWhite)
+        val correlation = EngineCorrelation.compute(userEvals, playerIsWhite)
+        val recovery    = RecoveryRate.compute(userEvals, playerIsWhite)
 
         val opening    = userEvals.filter { it.moveIndex <= OPENING_LAST_PLY }
         val middlegame = userEvals.filter { it.moveIndex in (OPENING_LAST_PLY + 1)..MIDDLEGAME_LAST_PLY }
@@ -95,27 +116,36 @@ object GameStatsCalculator {
             conversionAccuracy        = winning.accuracy(playerIsWhite),
             accuracyStdDev            = accuracies.stdDev(),
             rushedBlunderRate         = rushedBlunderRate,
+            avgTimeWinningSec         = timeDist.avgWinningSec,
+            avgTimeLosingSec          = timeDist.avgLosingSec,
+            sharpMoveCount            = correlation.sharpMoves,
+            sharpBestMoves            = correlation.sharpBest,
+            quietMoveCount            = correlation.quietMoves,
+            quietBestMoves            = correlation.quietBest,
+            forkBlunders              = forkBlunders,
+            hangingBlunders           = hangingBlunders,
+            oversightCount            = recovery.oversights,
+            oversightRecovered        = recovery.recovered,
+            pawnStructure             = pawnStructure,
             openingEco                = game.openingEco,
             openingName               = game.openingName,
             analysisDepth             = analysisDepth,
+            statsVersion              = STATS_VERSION,
         )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** White-perspective eval before the move was played. */
-    private fun evalBefore(ev: GameEvaluation): Int = ev.evalCp - ev.evalDelta
-
     /** Eval before the move from the mover's own perspective. */
     private fun moverEvalBefore(ev: GameEvaluation, isWhite: Boolean): Int =
-        if (isWhite) evalBefore(ev) else -evalBefore(ev)
+        MoveMetrics.moverEvalBefore(ev, isWhite)
 
     private fun accuracyOf(ev: GameEvaluation, isWhite: Boolean): Float =
-        PlayerStatsCalculator.moveAccuracy(evalBefore(ev), ev.evalCp, isWhite)
+        PlayerStatsCalculator.moveAccuracy(MoveMetrics.evalBefore(ev), ev.evalCp, isWhite)
 
     /** Centipawn loss for the mover (>= 0). */
     private fun cplOf(ev: GameEvaluation, isWhite: Boolean): Int =
-        maxOf(0, if (isWhite) -ev.evalDelta else ev.evalDelta)
+        MoveMetrics.cpl(ev, isWhite)
 
     private fun List<GameEvaluation>.accuracy(isWhite: Boolean): Float =
         map { accuracyOf(it, isWhite) }.avgOrZero()

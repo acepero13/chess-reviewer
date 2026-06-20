@@ -24,6 +24,19 @@ interface GameStatsDao {
     @Query("SELECT id FROM review_games WHERE id NOT IN (SELECT gameId FROM game_stats)")
     suspend fun gameIdsWithoutStats(): List<Long>
 
+    /**
+     * Ids of imported games whose stats are missing **or** stale (computed by an older metric
+     * schema). Stale-but-already-evaluated games recompute for free (no engine cost).
+     */
+    @Query(
+        """
+        SELECT id FROM review_games
+        WHERE id NOT IN (SELECT gameId FROM game_stats)
+           OR id IN (SELECT gameId FROM game_stats WHERE statsVersion < :version)
+        """
+    )
+    suspend fun gameIdsNeedingStats(version: Int): List<Long>
+
     @Query("SELECT COUNT(*) FROM game_stats")
     suspend fun count(): Int
 

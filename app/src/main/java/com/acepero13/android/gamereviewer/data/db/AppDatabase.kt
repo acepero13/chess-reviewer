@@ -38,6 +38,8 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *   9 → added whitePlayer, blackPlayer columns to snippets
  *  10 → added lastReviewedMoveIndex to review_games; added guess_move_progress table
  *  11 → added game_stats table (Insights: precomputed per-game Chess.com-style stats)
+ *  12 → added Insights metric columns to game_stats (time distribution, engine correlation,
+ *       motif blunders, oversight recovery, pawn structure, statsVersion)
  */
 @Database(
     entities    = [
@@ -52,7 +54,7 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         GuessMoveProgress::class,
         GameStats::class,
     ],
-    version     = 11,
+    version     = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -202,6 +204,23 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS index_game_stats_gameId ON game_stats(gameId)"
                 )
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN avgTimeWinningSec REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN avgTimeLosingSec REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN sharpMoveCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN sharpBestMoves INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN quietMoveCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN quietBestMoves INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN forkBlunders INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN hangingBlunders INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN oversightCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN oversightRecovered INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN pawnStructure TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN statsVersion INTEGER NOT NULL DEFAULT 0")
             }
         }
     }
