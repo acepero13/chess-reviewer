@@ -66,6 +66,34 @@ data class GameStats(
     /** Dominant middlegame pawn-structure label (e.g. "Isolated Queen's Pawn"), "" if none. */
     val pawnStructure: String = "",
 
+    // ── Conversion: ahead / behind outcomes (Conversion tab) ────────────────────
+    /** The user reached a clearly winning position (mover eval ≥ +200cp) at some point. */
+    val reachedWinning: Boolean = false,
+    /** Reached a winning position **and** went on to win the game. */
+    val convertedWin: Boolean = false,
+    /** The user fell into a clearly losing position (mover eval ≤ -200cp) at some point. */
+    val reachedLosing: Boolean = false,
+    /** Reached a losing position but did **not** lose (draw or win). */
+    val savedLoss: Boolean = false,
+    /** Peak winning advantage reached, mover-perspective cp (0 if never winning). */
+    val peakWinningCp: Int = 0,
+    /** Deepest losing disadvantage reached, mover-perspective cp ≤ 0 (0 if never losing). */
+    val peakLosingCp: Int = 0,
+
+    // ── Discipline: time pressure (Discipline tab) ──────────────────────────────
+    /** The user's clock dropped into time pressure (< 30s remaining) during the game. */
+    val inTimePressure: Boolean = false,
+    /** The user effectively flagged: clock ran to ~0 and the game was lost. */
+    val flaggedOnTime: Boolean = false,
+    /** Blunders the user made while under time pressure (low clock). */
+    val blundersUnderPressure: Int = 0,
+    /** Catastrophic, game-deciding blunders (loss ≥ 300cp). */
+    val decisiveBlunders: Int = 0,
+
+    // ── Preparation: opening book depth (Preparation tab) ───────────────────────
+    /** How many half-moves the game stayed in opening theory (deepest matched ECO line). */
+    val bookDepthPly: Int = 0,
+
     val openingEco: String = "",
     val openingName: String = "",
     val analysisDepth: Int,

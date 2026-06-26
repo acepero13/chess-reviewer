@@ -12,14 +12,19 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.acepero13.android.gamereviewer.data.db.GameEvaluationDao
 import com.acepero13.android.gamereviewer.data.db.GameStatsDao
+import com.acepero13.android.gamereviewer.data.db.MotifTacticStatDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
+import com.acepero13.android.gamereviewer.data.db.NotablePositionDao
 import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
 import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
+import com.acepero13.android.gamereviewer.domain.MotifTacticAggregator
+import com.acepero13.android.gamereviewer.domain.NotablePositionExtractor
 import com.acepero13.android.gamereviewer.domain.PawnStructureTagger
 import com.acepero13.android.gamereviewer.domain.TruthMapBuilder
+import com.acepero13.chess.core.opening.OpeningClassifier
 import kotlinx.coroutines.flow.first
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -45,9 +50,12 @@ class ShallowAnalysisWorker(
     private val gameEvaluationDao: GameEvaluationDao by inject()
     private val moveTimeDao: MoveTimeDao by inject()
     private val gameStatsDao: GameStatsDao by inject()
+    private val notablePositionDao: NotablePositionDao by inject()
+    private val motifTacticStatDao: MotifTacticStatDao by inject()
     private val truthMapBuilder: TruthMapBuilder by inject()
     private val settingsRepo: SettingsRepository by inject()
     private val middlegamePlanDetector: MiddlegamePlanDetector by inject()
+    private val openingClassifier: OpeningClassifier by inject()
 
     private val pawnStructureTagger by lazy { PawnStructureTagger(middlegamePlanDetector) }
 
@@ -93,6 +101,9 @@ class ShallowAnalysisWorker(
         val pawnStructure = runCatching {
             pawnStructureTagger.tag(uci, playerIsWhite)
         }.getOrDefault("")
+        val bookDepthPly = runCatching {
+            bookDepthPly(openingClassifier.classifyByMoves(uci)?.pgn)
+        }.getOrDefault(0)
         val stats = GameStatsCalculator.compute(
             game = game,
             evaluations = evaluations,
@@ -101,9 +112,24 @@ class ShallowAnalysisWorker(
             // Reused evals were produced by the full in-app analysis pass.
             analysisDepth = if (ranShallowPass) SHALLOW_DEPTH else com.acepero13.chess.core.data.model.ChessConstants.DEFAULT_ANALYSIS_DEPTH,
             pawnStructure = pawnStructure,
+            bookDepthPly = bookDepthPly,
         )
         gameStatsDao.upsert(stats)
+
+        // Board-thumbnail positions + per-motif find-rate (cleared per-game before re-inserting).
+        notablePositionDao.deleteByGameId(gameId)
+        runCatching {
+            NotablePositionExtractor.extract(gameId, uci, evaluations, playerIsWhite)
+        }.getOrDefault(emptyList()).takeIf { it.isNotEmpty() }?.let { notablePositionDao.insertAll(it) }
+
+        motifTacticStatDao.deleteByGameId(gameId)
+        MotifTacticAggregator.aggregate(gameId, evaluations, playerIsWhite)
+            .takeIf { it.isNotEmpty() }?.let { motifTacticStatDao.insertAll(it) }
     }
+
+    /** Half-move depth of the matched opening line, counting plies in its PGN (e.g. "1. e4 c5" = 2). */
+    private fun bookDepthPly(pgn: String?): Int =
+        pgn?.split(' ')?.count { it.isNotBlank() && !it.endsWith(".") } ?: 0
 
     private fun foregroundInfo(done: Int, total: Int): ForegroundInfo {
         val ctx = applicationContext

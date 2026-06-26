@@ -26,12 +26,21 @@ object GameStatsCalculator {
     /** Mover-perspective eval (cp) above which the position is "winning" (conversion). */
     private const val WINNING_CP = 200
 
+    /** A single blunder of this size (cp) is treated as game-deciding (mirrors BlunderAnalyzer). */
+    private const val CATASTROPHIC_CP = 300
+
+    /** Clock reading (s) at or below which the user is considered to be in time pressure. */
+    private const val TIME_PRESSURE_SEC = 30
+
+    /** Clock reading (s) at or below which a final move counts as an effective flag. */
+    private const val FLAG_SEC = 2
+
     /**
      * @param username the player's handle (from SettingsRepository). When it matches neither
      *                 side (or is blank) the user is assumed to be White.
      */
     /** Bumped whenever the set/definition of computed metrics changes — forces a free recompute. */
-    const val STATS_VERSION = 1
+    const val STATS_VERSION = 2
 
     /**
      * Which side the user played. When [username] matches neither side (or is blank) the user is
@@ -50,6 +59,7 @@ object GameStatsCalculator {
         username: String,
         analysisDepth: Int,
         pawnStructure: String,
+        bookDepthPly: Int = 0,
     ): GameStats {
         val playerIsWhite = playerIsWhite(game, username)
 
@@ -100,6 +110,27 @@ object GameStatsCalculator {
             if (decisions.isEmpty()) 0f
             else TimeAnalyzer.countRushedBlunders(decisions).toFloat() / decisions.size
 
+        // ── Conversion: ahead / behind outcomes ─────────────────────────────────
+        val moverEvals = userEvals.map { moverEvalBefore(it, playerIsWhite) }
+        val peakWinningCp = (moverEvals.maxOrNull() ?: 0).coerceAtLeast(0)
+        val peakLosingCp  = (moverEvals.minOrNull() ?: 0).coerceAtMost(0)
+        val reachedWinning = peakWinningCp >= WINNING_CP
+        val reachedLosing  = peakLosingCp <= -WINNING_CP
+        val won  = userWon(game.result, playerIsWhite)
+        val lost = userLost(game.result, playerIsWhite)
+
+        // ── Discipline: time pressure ───────────────────────────────────────────
+        val clockByIndex = moveTimes.associate { it.moveIndex to it.clockRemainingSeconds }
+        val userClocks = userEvals.mapNotNull { clockByIndex[it.moveIndex] }
+        val hasClock = userClocks.isNotEmpty()
+        val inTimePressure = userClocks.any { it in 1..TIME_PRESSURE_SEC }
+        val flaggedOnTime = hasClock && lost && (userClocks.lastOrNull() ?: Int.MAX_VALUE) <= FLAG_SEC
+        val blundersUnderPressure = userEvals.count { ev ->
+            MoveClassifier.classify(cplOf(ev, playerIsWhite)) == MoveClassifier.Quality.BLUNDER &&
+                (clockByIndex[ev.moveIndex]?.let { it in 1..TIME_PRESSURE_SEC } ?: false)
+        }
+        val decisiveBlunders = userEvals.count { cplOf(it, playerIsWhite) >= CATASTROPHIC_CP }
+
         return GameStats(
             gameId                    = game.id,
             playerIsWhite             = playerIsWhite,
@@ -126,6 +157,17 @@ object GameStatsCalculator {
             hangingBlunders           = hangingBlunders,
             oversightCount            = recovery.oversights,
             oversightRecovered        = recovery.recovered,
+            reachedWinning            = reachedWinning,
+            convertedWin              = reachedWinning && won,
+            reachedLosing             = reachedLosing,
+            savedLoss                 = reachedLosing && !lost,
+            peakWinningCp             = peakWinningCp,
+            peakLosingCp              = peakLosingCp,
+            inTimePressure            = inTimePressure,
+            flaggedOnTime             = flaggedOnTime,
+            blundersUnderPressure     = blundersUnderPressure,
+            decisiveBlunders          = decisiveBlunders,
+            bookDepthPly              = bookDepthPly,
             pawnStructure             = pawnStructure,
             openingEco                = game.openingEco,
             openingName               = game.openingName,
@@ -135,6 +177,18 @@ object GameStatsCalculator {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun userWon(result: String, isWhite: Boolean): Boolean = when (result) {
+        "1-0" -> isWhite
+        "0-1" -> !isWhite
+        else  -> false
+    }
+
+    private fun userLost(result: String, isWhite: Boolean): Boolean = when (result) {
+        "1-0" -> !isWhite
+        "0-1" -> isWhite
+        else  -> false
+    }
 
     /** Eval before the move from the mover's own perspective. */
     private fun moverEvalBefore(ev: GameEvaluation, isWhite: Boolean): Int =

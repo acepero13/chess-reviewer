@@ -16,9 +16,14 @@ import com.acepero13.android.gamereviewer.ui.screens.AnalysisViewModel
 import com.acepero13.android.gamereviewer.ui.screens.DashboardViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameListViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GameReportViewModel
+import com.acepero13.android.gamereviewer.ui.screens.BlunderInsightsViewModel
+import com.acepero13.android.gamereviewer.ui.screens.ConversionViewModel
+import com.acepero13.android.gamereviewer.ui.screens.DisciplineViewModel
 import com.acepero13.android.gamereviewer.ui.screens.HomeViewModel
 import com.acepero13.android.gamereviewer.ui.screens.ImportViewModel
 import com.acepero13.android.gamereviewer.ui.screens.InsightsViewModel
+import com.acepero13.android.gamereviewer.ui.screens.PreparationViewModel
+import com.acepero13.android.gamereviewer.ui.screens.TacticsViewModel
 import com.acepero13.android.gamereviewer.ui.screens.GuessTheMoveViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SessionDebriefViewModel
 import com.acepero13.android.gamereviewer.ui.screens.SettingsViewModel
@@ -43,7 +48,7 @@ val appModule = module {
             AppDatabase::class.java,
             "game_reviewer.db",
         )
-            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12)
+            .addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -57,6 +62,8 @@ val appModule = module {
     single { get<AppDatabase>().snippetDao() }
     single { get<AppDatabase>().guessMoveProgressDao() }
     single { get<AppDatabase>().gameStatsDao() }
+    single { get<AppDatabase>().notablePositionDao() }
+    single { get<AppDatabase>().motifTacticStatDao() }
 
     // ── Repositories ──────────────────────────────────────────────────────────
     single { GameRepository(get()) }
@@ -133,6 +140,46 @@ val appModule = module {
             criticalMomentDao = get(),
             repo              = get(),
             context           = androidContext(),
+        )
+    }
+    viewModel {
+        BlunderInsightsViewModel(
+            gameStatsDao      = get(),
+            criticalMomentDao = get(),
+            repo              = get(),
+            context           = androidContext(),
+        )
+    }
+    viewModel {
+        ConversionViewModel(
+            gameStatsDao       = get(),
+            notablePositionDao = get(),
+            repo               = get(),
+            context            = androidContext(),
+        )
+    }
+    viewModel {
+        DisciplineViewModel(
+            gameStatsDao = get(),
+            moveTimeDao  = get(),
+            repo         = get(),
+            context      = androidContext(),
+        )
+    }
+    viewModel {
+        PreparationViewModel(
+            gameStatsDao = get(),
+            repo         = get(),
+            context      = androidContext(),
+        )
+    }
+    viewModel {
+        TacticsViewModel(
+            gameStatsDao       = get(),
+            motifTacticStatDao = get(),
+            notablePositionDao = get(),
+            repo               = get(),
+            context            = androidContext(),
         )
     }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }

@@ -10,7 +10,9 @@ import com.acepero13.android.gamereviewer.data.model.GameEvaluation
 import com.acepero13.android.gamereviewer.data.model.GameStats
 import com.acepero13.android.gamereviewer.data.model.GuessMoveProgress
 import com.acepero13.android.gamereviewer.data.model.GuessMoveSession
+import com.acepero13.android.gamereviewer.data.model.MotifTacticStat
 import com.acepero13.android.gamereviewer.data.model.MoveTimeData
+import com.acepero13.android.gamereviewer.data.model.NotablePosition
 import com.acepero13.android.gamereviewer.data.model.ReviewGame
 import com.acepero13.android.gamereviewer.data.model.Snippet
 import com.acepero13.chess.core.data.db.PositionAnnotationDao
@@ -40,6 +42,8 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
  *  11 → added game_stats table (Insights: precomputed per-game Chess.com-style stats)
  *  12 → added Insights metric columns to game_stats (time distribution, engine correlation,
  *       motif blunders, oversight recovery, pawn structure, statsVersion)
+ *  13 → added Conversion/Discipline/Preparation columns to game_stats; added notable_positions
+ *       and motif_tactic_stats tables (Conversion, Discipline, Preparation, Tactics tabs)
  */
 @Database(
     entities    = [
@@ -53,8 +57,10 @@ import com.acepero13.chess.core.data.model.PositionAnnotation
         Snippet::class,
         GuessMoveProgress::class,
         GameStats::class,
+        NotablePosition::class,
+        MotifTacticStat::class,
     ],
-    version     = 12,
+    version     = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -68,6 +74,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun snippetDao(): SnippetDao
     abstract fun guessMoveProgressDao(): GuessMoveProgressDao
     abstract fun gameStatsDao(): GameStatsDao
+    abstract fun notablePositionDao(): NotablePositionDao
+    abstract fun motifTacticStatDao(): MotifTacticStatDao
 
     companion object {
         val MIGRATION_3_4 = object : Migration(3, 4) {
@@ -221,6 +229,55 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE game_stats ADD COLUMN oversightRecovered INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE game_stats ADD COLUMN pawnStructure TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE game_stats ADD COLUMN statsVersion INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // New game_stats columns for Conversion / Discipline / Preparation tabs.
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN reachedWinning INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN convertedWin INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN reachedLosing INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN savedLoss INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN peakWinningCp INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN peakLosingCp INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN inTimePressure INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN flaggedOnTime INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN blundersUnderPressure INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN decisiveBlunders INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE game_stats ADD COLUMN bookDepthPly INTEGER NOT NULL DEFAULT 0")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS notable_positions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        gameId INTEGER NOT NULL,
+                        moveIndex INTEGER NOT NULL,
+                        fen TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        playedMove TEXT NOT NULL,
+                        bestMove TEXT NOT NULL,
+                        evalBeforeCp INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_notable_positions_gameId ON notable_positions(gameId)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS motif_tactic_stats (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        gameId INTEGER NOT NULL,
+                        motif TEXT NOT NULL,
+                        opportunities INTEGER NOT NULL,
+                        found INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_motif_tactic_stats_gameId ON motif_tactic_stats(gameId)")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_motif_tactic_stats_gameId_motif ON motif_tactic_stats(gameId, motif)"
+                )
             }
         }
     }
