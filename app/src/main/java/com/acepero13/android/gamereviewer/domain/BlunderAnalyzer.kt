@@ -71,8 +71,11 @@ object BlunderAnalyzer {
     /** Without flagged moments, this many blunders in one game is treated as game-throwing. */
     private const val MULTI_BLUNDER_THROW = 3
 
-    /** Rough rating points conceded per game lost to a single catastrophic blunder. */
-    private const val RATING_PER_LOSS = 8
+    /**
+     * Rough net rating swing of a single game lost to a catastrophic blunder — converting one such
+     * loss into a non-loss is worth roughly half a K-factor (K≈32) in Elo terms.
+     */
+    private const val RATING_PER_LOSS = 16
 
     private const val COACHING_TIP =
         "When you're ahead or the position is tense, slow down. Before committing to a move, do " +
@@ -173,14 +176,17 @@ object BlunderAnalyzer {
     ): RatingLeak {
         val thrown = stats.filter { isGameThrowing(it, catastrophicByGame, gamesWithMoments) }
         val losses = thrown.count { gs -> userLost(resultByGame[gs.gameId], gs.playerIsWhite) }
-        val elo = losses * RATING_PER_LOSS
+        // Per-game average so the figure reflects ongoing leakage and stays bounded, instead of a
+        // runaway lifetime sum that only ever grows as more games are reviewed.
+        val elo = if (stats.isEmpty()) 0
+            else Math.round(losses.toFloat() * RATING_PER_LOSS / stats.size)
         val decidedRate = if (stats.isEmpty()) 0 else thrown.size * 100 / stats.size
 
         val body = if (losses == 0) {
             "No game has been decided by a single catastrophic blunder yet — keep that streak going."
         } else {
-            "$losses of your games were decided by a single catastrophic blunder, leading to " +
-                "$losses ${if (losses == 1) "loss" else "losses"}. That's a $decidedRate% rate."
+            "$losses of your ${stats.size} games were decided by a single catastrophic blunder " +
+                "(a $decidedRate% rate). On average that's about $elo Elo bled per game."
         }
         return RatingLeak(
             estimatedEloLost = elo,

@@ -11,6 +11,9 @@ import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.model.CriticalMoment
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
+import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
 import com.acepero13.android.gamereviewer.domain.PlayerProfile
 import com.acepero13.android.gamereviewer.domain.PlayerProfileBuilder
 import com.acepero13.android.gamereviewer.work.ShallowAnalysisWorker
@@ -103,6 +106,7 @@ class InsightsViewModel(
     private val criticalMomentDao: CriticalMomentDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -111,15 +115,17 @@ class InsightsViewModel(
     val uiState: StateFlow<InsightsUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = gameStatsDao.getAll()           // newest first
+            val ids = AnalyticsGameFilter.eligibleIds(repo.getAll(), filterStore.filter.value)
+            val stats = gameStatsDao.getAll().filter { it.gameId in ids }   // newest first
             val total = repo.count()
-            val moments = criticalMomentDao.getAll()
+            val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
+            val moments = criticalMomentDao.getAll().filter { it.gameId in ids }
             val profile = PlayerProfileBuilder.build(stats, moments)
             val phaseBreakdown = PhaseBreakdown(
                 opening    = moments.count { it.gamePhase() == "opening" },
@@ -164,7 +170,7 @@ class InsightsViewModel(
                     isLoading          = false,
                     totalGames         = total,
                     gamesAnalyzed      = stats.size,
-                    gamesPending       = (total - stats.size).coerceAtLeast(0),
+                    gamesPending       = pending,
                     avgAccuracy        = if (stats.isEmpty()) 0f else stats.map { s -> s.accuracy }.average().toFloat(),
                     avgAcpl            = if (stats.isEmpty()) 0 else stats.map { s -> s.acpl }.average().toInt(),
                     totalBlunders      = stats.sumOf { s -> s.blunders },

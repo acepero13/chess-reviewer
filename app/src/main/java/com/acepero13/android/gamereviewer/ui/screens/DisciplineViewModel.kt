@@ -10,6 +10,8 @@ import androidx.work.WorkManager
 import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.db.MoveTimeDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
 import com.acepero13.android.gamereviewer.domain.DisciplineAnalyzer
 import com.acepero13.android.gamereviewer.domain.DisciplineReport
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
@@ -41,6 +43,7 @@ class DisciplineViewModel(
     private val moveTimeDao: MoveTimeDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -49,21 +52,21 @@ class DisciplineViewModel(
     val uiState: StateFlow<DisciplineUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = gameStatsDao.getAll()
-            val moveTimes = moveTimeDao.getAll()
-            val total = repo.count()
+            val ids = AnalyticsGameFilter.eligibleIds(repo.getAll(), filterStore.filter.value)
+            val stats = gameStatsDao.getAll().filter { it.gameId in ids }
+            val moveTimes = moveTimeDao.getAll().filter { it.gameId in ids }
             val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
             val report = DisciplineAnalyzer.analyze(stats, moveTimes)
             _uiState.update {
                 it.copy(
                     isLoading     = false,
-                    gamesAnalyzed = (total - pending).coerceAtLeast(0),
+                    gamesAnalyzed = stats.size,
                     gamesPending  = pending,
                     report        = report,
                 )

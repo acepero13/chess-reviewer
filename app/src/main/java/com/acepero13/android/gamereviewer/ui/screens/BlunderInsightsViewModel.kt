@@ -10,7 +10,10 @@ import androidx.work.WorkManager
 import com.acepero13.android.gamereviewer.data.db.CriticalMomentDao
 import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
 import com.acepero13.android.gamereviewer.domain.BlunderAnalyzer
+import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
 import com.acepero13.android.gamereviewer.domain.BlunderReport
 import com.acepero13.android.gamereviewer.work.ShallowAnalysisWorker
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +45,7 @@ class BlunderInsightsViewModel(
     private val criticalMomentDao: CriticalMomentDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -50,23 +54,25 @@ class BlunderInsightsViewModel(
     val uiState: StateFlow<BlunderUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = gameStatsDao.getAll()
-            val moments = criticalMomentDao.getAll()
-            val games = repo.getAll()
-            val total = repo.count()
+            val allGames = repo.getAll()
+            val ids = AnalyticsGameFilter.eligibleIds(allGames, filterStore.filter.value)
+            val stats = gameStatsDao.getAll().filter { it.gameId in ids }
+            val moments = criticalMomentDao.getAll().filter { it.gameId in ids }
+            val games = allGames.filter { it.id in ids }
+            val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
             val report = BlunderAnalyzer.analyze(stats, moments, games)
 
             _uiState.update {
                 it.copy(
                     isLoading     = false,
                     gamesAnalyzed = stats.size,
-                    gamesPending  = (total - stats.size).coerceAtLeast(0),
+                    gamesPending  = pending,
                     report        = report,
                 )
             }

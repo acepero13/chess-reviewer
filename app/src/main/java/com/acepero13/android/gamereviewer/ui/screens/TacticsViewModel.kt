@@ -11,6 +11,8 @@ import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.db.MotifTacticStatDao
 import com.acepero13.android.gamereviewer.data.db.NotablePositionDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
 import com.acepero13.android.gamereviewer.domain.TacticsAnalyzer
 import com.acepero13.android.gamereviewer.domain.TacticsReport
@@ -43,6 +45,7 @@ class TacticsViewModel(
     private val notablePositionDao: NotablePositionDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -51,21 +54,22 @@ class TacticsViewModel(
     val uiState: StateFlow<TacticsUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val motifStats = motifTacticStatDao.getAll()
-            val notable = notablePositionDao.getAll()
-            val total = repo.count()
+            val ids = AnalyticsGameFilter.eligibleIds(repo.getAll(), filterStore.filter.value)
+            val motifStats = motifTacticStatDao.getAll().filter { it.gameId in ids }
+            val notable = notablePositionDao.getAll().filter { it.gameId in ids }
+            val analyzed = gameStatsDao.getAll().count { it.gameId in ids }
             val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
             val report = TacticsAnalyzer.analyze(motifStats, notable)
             _uiState.update {
                 it.copy(
                     isLoading     = false,
-                    gamesAnalyzed = (total - pending).coerceAtLeast(0),
+                    gamesAnalyzed = analyzed,
                     gamesPending  = pending,
                     report        = report,
                 )

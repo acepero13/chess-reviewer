@@ -10,6 +10,8 @@ import com.acepero13.android.gamereviewer.data.model.MoveTimeData
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
 import com.acepero13.android.gamereviewer.domain.BehavioralDiagnostic
 import com.acepero13.android.gamereviewer.domain.TrainingPlanRecommender
 import com.acepero13.android.gamereviewer.domain.TrainingRecommendation
@@ -102,12 +104,15 @@ class DashboardViewModel(
     private val settingsRepo: SettingsRepository,
     private val moveTimeDao: MoveTimeDao,
     private val openingClassifier: OpeningClassifier,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
-    init { loadDashboard() }
+    init {
+        viewModelScope.launch { filterStore.filter.collect { loadDashboard() } }
+    }
 
     fun refresh() { loadDashboard() }
 
@@ -115,10 +120,16 @@ class DashboardViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val totalGames    = repo.count()
-                val gamesAnalyzed = criticalMomentDao.countGamesAnalyzed()
-                val allMoments    = criticalMomentDao.getAll()
-                val allGames      = repo.getAll()
+                val games         = repo.getAll()
+                val ids           = AnalyticsGameFilter.eligibleIds(games, filterStore.filter.value)
+                val allGames      = games.filter { it.id in ids }
+                val allMoments    = criticalMomentDao.getAll().filter { it.gameId in ids }
+                val totalGames    = allGames.size
+                val gamesAnalyzed = allMoments
+                    .filter { it.type == CriticalMoment.Type.ENGINE_MARKED.name }
+                    .map { it.gameId }
+                    .distinct()
+                    .size
                 val username      = settingsRepo.username.first().trim()
 
                 val trends  = BehavioralDiagnostic.diagnose(allMoments, topN = 3)
@@ -157,7 +168,7 @@ class DashboardViewModel(
                         )
                     }
 
-                val allEncounters = endgameEncounterDao.getAll()
+                val allEncounters = endgameEncounterDao.getAll().filter { it.gameId in ids }
                 val endgameWeaknesses = allEncounters
                     .groupBy { it.chapter }
                     .map { (chapter, rows) ->
@@ -182,7 +193,7 @@ class DashboardViewModel(
 
                 val phaseHeatmap = PhaseFailureHeatmap.compute(allMoments)
 
-                val allMoveTimes = moveTimeDao.getAll()
+                val allMoveTimes = moveTimeDao.getAll().filter { it.gameId in ids }
                 val timesByGame  = allMoveTimes.groupBy { it.gameId }
                 val velocityConsistency = VelocityConsistencyAnalyzer.compute(timesByGame)
 

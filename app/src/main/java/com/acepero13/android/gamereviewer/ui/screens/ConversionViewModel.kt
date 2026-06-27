@@ -11,6 +11,8 @@ import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.db.NotablePositionDao
 import com.acepero13.android.gamereviewer.data.model.NotablePosition
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
 import com.acepero13.android.gamereviewer.domain.ConversionAnalyzer
 import com.acepero13.android.gamereviewer.domain.ConversionReport
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
@@ -42,6 +44,7 @@ class ConversionViewModel(
     private val notablePositionDao: NotablePositionDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -50,21 +53,22 @@ class ConversionViewModel(
     val uiState: StateFlow<ConversionUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = gameStatsDao.getAll()
+            val ids = AnalyticsGameFilter.eligibleIds(repo.getAll(), filterStore.filter.value)
+            val stats = gameStatsDao.getAll().filter { it.gameId in ids }
             val missed = notablePositionDao.getByKind(NotablePosition.Kind.MISSED_SIMPLIFICATION.name)
-            val total = repo.count()
+                .filter { it.gameId in ids }
             val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
             val report = ConversionAnalyzer.analyze(stats, missed)
             _uiState.update {
                 it.copy(
                     isLoading     = false,
-                    gamesAnalyzed = (total - pending).coerceAtLeast(0),
+                    gamesAnalyzed = stats.size,
                     gamesPending  = pending,
                     report        = report,
                 )

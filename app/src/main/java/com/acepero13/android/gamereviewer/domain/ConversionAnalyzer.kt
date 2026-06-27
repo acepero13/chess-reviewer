@@ -29,8 +29,11 @@ data class SideStats(
     val accuracy: Float,
 )
 
-/** A single game's dot on the ahead/behind scatter. */
-data class ConversionPoint(val peakCp: Int, val accuracy: Float, val won: Boolean)
+/**
+ * A single game's dot on the ahead/behind plot. [accuracy] is 0–100 in the relevant phase;
+ * [success] is the *good* outcome for that side (converted a win / saved a loss).
+ */
+data class ConversionPoint(val accuracy: Float, val success: Boolean)
 
 object ConversionAnalyzer {
 
@@ -60,10 +63,10 @@ object ConversionAnalyzer {
         )
 
         val winningScatter = ahead.map {
-            ConversionPoint(it.peakWinningCp, it.conversionAccuracy, it.convertedWin)
+            ConversionPoint(it.conversionAccuracy, it.convertedWin)
         }
         val losingScatter = behind.map {
-            ConversionPoint(it.peakLosingCp, it.middlegameDefenseAccuracy, !it.savedLoss)
+            ConversionPoint(it.middlegameDefenseAccuracy, it.savedLoss)
         }
 
         return ConversionReport(

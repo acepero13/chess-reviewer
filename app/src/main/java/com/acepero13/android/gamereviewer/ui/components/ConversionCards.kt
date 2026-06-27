@@ -5,6 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,13 +19,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.acepero13.android.gamereviewer.domain.ConversionPoint
 import com.acepero13.android.gamereviewer.domain.SideStats
 import com.acepero13.chess.core.ui.theme.LocalAppColors
-import kotlin.math.abs
 
 private val AheadColor = Color(0xFF81C784)
 private val BehindColor = Color(0xFF64B5F6)
@@ -109,52 +114,103 @@ private fun RingRow(games: Int, accuracy: Float, accent: Color) {
 }
 
 /**
- * Scatter of one dot per game: x = magnitude of the peak eval reached (cp), y = accuracy in that
- * phase. Dots are coloured by whether the game was ultimately won or lost.
+ * Per-game accuracy split into two outcome columns. Each dot is one game positioned by its accuracy
+ * (Y); games are grouped into the good-outcome column ([goodLabel]) and the bad-outcome column
+ * ([badLabel]) and jittered horizontally so individual games stay visible. A bold bar marks each
+ * group's median accuracy, making the gap between good and bad outcomes the headline.
+ *
+ * Plotting accuracy by outcome (rather than against peak eval, which barely varies) is what surfaces
+ * the actual story: how inaccurate your play was in the games you threw vs the ones you converted.
  */
 @Composable
 fun ConversionScatterChart(
     title: String,
     points: List<ConversionPoint>,
-    axisMaxCp: Int,
+    goodLabel: String,
+    badLabel: String,
+    readingHint: String,
     modifier: Modifier = Modifier,
 ) {
     val appColors = LocalAppColors.current
     InsightCard(title = title, modifier = modifier) {
-        if (points.isEmpty()) {
+        val plotted = points.filter { it.accuracy > 0f }
+        if (plotted.isEmpty()) {
             Text("No games in this category yet.", style = MaterialTheme.typography.bodySmall, color = appColors.textSecondary)
             return@InsightCard
         }
-        val grid = appColors.textTertiary.copy(alpha = 0.25f)
-        Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
-            val padL = 8f; val padR = 8f; val padT = 8f; val padB = 8f
-            val w = size.width - padL - padR
-            val h = size.height - padT - padB
-            // Grid lines (accuracy bands at 25/50/75%).
-            listOf(0.25f, 0.5f, 0.75f).forEach { f ->
-                val y = padT + h * (1f - f)
-                drawLine(grid, Offset(padL, y), Offset(padL + w, y), strokeWidth = 1f)
-            }
-            val maxCp = axisMaxCp.coerceAtLeast(1)
-            points.forEach { p ->
-                val x = padL + w * (abs(p.peakCp).toFloat() / maxCp).coerceIn(0f, 1f)
-                val y = padT + h * (1f - (p.accuracy / 100f).coerceIn(0f, 1f))
-                drawCircle(
-                    color = if (p.won) WonColor else LostColor,
-                    radius = 6f,
-                    center = Offset(x, y),
-                )
+        val good = plotted.filter { it.success }
+        val bad = plotted.filter { !it.success }
+        OutcomeAccuracyPlot(good = good, bad = bad)
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+            ColumnLabel("$goodLabel (${good.size})", WonColor, Modifier.weight(1f))
+            ColumnLabel("$badLabel (${bad.size})", LostColor, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("Bars mark each group's median accuracy.", style = MaterialTheme.typography.labelSmall, color = appColors.textSecondary)
+        Text(readingHint, style = MaterialTheme.typography.labelSmall, color = appColors.textSecondary)
+    }
+}
+
+/** Two jittered dot columns (good / bad) over a labelled accuracy axis. */
+@Composable
+private fun OutcomeAccuracyPlot(good: List<ConversionPoint>, bad: List<ConversionPoint>) {
+    val appColors = LocalAppColors.current
+    val axisLabel = MaterialTheme.typography.labelSmall
+    Row(modifier = Modifier.fillMaxWidth().height(200.dp)) {
+        // Accuracy axis labels, top (100%) to bottom (0%).
+        Column(
+            modifier = Modifier.fillMaxHeight().padding(end = 6.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End,
+        ) {
+            listOf(100, 75, 50, 25, 0).forEach { pct ->
+                Text("$pct%", style = axisLabel, color = appColors.textSecondary)
             }
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            LegendDot("Won", WonColor)
-            LegendDot("Lost", LostColor)
-            Text("x: peak eval · y: accuracy", style = MaterialTheme.typography.labelSmall, color = appColors.textSecondary)
+        val grid = appColors.textTertiary.copy(alpha = 0.30f)
+        val axis = appColors.textTertiary.copy(alpha = 0.55f)
+        Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            val w = size.width
+            val h = size.height
+            val dashed = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))
+            listOf(0.25f, 0.5f, 0.75f).forEach { f ->
+                val y = h * (1f - f)
+                drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1f, pathEffect = dashed)
+            }
+            drawLine(axis, Offset(0f, h), Offset(w, h), strokeWidth = 2f)
+            drawLine(axis, Offset(0f, 0f), Offset(0f, h), strokeWidth = 2f)
+
+            val half = w * 0.16f
+            fun yFor(acc: Float) = h * (1f - (acc / 100f).coerceIn(0f, 1f))
+            fun drawGroup(pts: List<ConversionPoint>, cx: Float, color: Color) {
+                if (pts.isEmpty()) return
+                drawRect(color.copy(alpha = 0.06f), topLeft = Offset(cx - half - 8f, 0f), size = Size((half + 8f) * 2f, h))
+                pts.forEachIndexed { i, p ->
+                    // Deterministic golden-ratio jitter keeps dots stable across recompositions.
+                    val frac = ((i * 0.6180339887).rem(1.0)).toFloat()
+                    val x = cx + (frac - 0.5f) * 2f * half
+                    val center = Offset(x, yFor(p.accuracy))
+                    drawCircle(color.copy(alpha = 0.55f), radius = 7f, center = center)
+                    drawCircle(color, radius = 7f, center = center, style = Stroke(width = 1.5f))
+                }
+                val median = pts.map { it.accuracy }.sorted().let { it[it.size / 2] }
+                val my = yFor(median)
+                drawLine(color, Offset(cx - half - 8f, my), Offset(cx + half + 8f, my), strokeWidth = 4f)
+            }
+            drawGroup(good, w * 0.30f, WonColor)
+            drawGroup(bad, w * 0.70f, LostColor)
         }
     }
 }
 
 @Composable
-private fun LegendDot(label: String, color: Color) {
-    Text("● $label", style = MaterialTheme.typography.labelSmall, color = color)
+private fun ColumnLabel(text: String, color: Color, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = modifier,
+    )
 }

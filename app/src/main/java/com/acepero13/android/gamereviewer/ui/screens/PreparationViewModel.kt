@@ -9,6 +9,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.acepero13.android.gamereviewer.data.db.GameStatsDao
 import com.acepero13.android.gamereviewer.data.repository.GameRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.AnalyticsGameFilter
 import com.acepero13.android.gamereviewer.domain.GameStatsCalculator
 import com.acepero13.android.gamereviewer.domain.PreparationAnalyzer
 import com.acepero13.android.gamereviewer.domain.PreparationReport
@@ -39,6 +41,7 @@ class PreparationViewModel(
     private val gameStatsDao: GameStatsDao,
     private val repo: GameRepository,
     context: Context,
+    private val filterStore: AnalyticsFilterStore,
 ) : ViewModel() {
 
     private val workManager = WorkManager.getInstance(context)
@@ -47,21 +50,22 @@ class PreparationViewModel(
     val uiState: StateFlow<PreparationUiState> = _uiState.asStateFlow()
 
     init {
-        load()
+        viewModelScope.launch { filterStore.filter.collect { load() } }
         observeWork()
     }
 
     fun load() {
         viewModelScope.launch(Dispatchers.IO) {
-            val stats = gameStatsDao.getAll()
-            val resultByGame = repo.getAll().associate { it.id to it.result }
-            val total = repo.count()
+            val games = repo.getAll()
+            val ids = AnalyticsGameFilter.eligibleIds(games, filterStore.filter.value)
+            val stats = gameStatsDao.getAll().filter { it.gameId in ids }
+            val resultByGame = games.associate { it.id to it.result }
             val pending = gameStatsDao.gameIdsNeedingStats(GameStatsCalculator.STATS_VERSION).size
             val report = PreparationAnalyzer.analyze(stats, resultByGame)
             _uiState.update {
                 it.copy(
                     isLoading     = false,
-                    gamesAnalyzed = (total - pending).coerceAtLeast(0),
+                    gamesAnalyzed = stats.size,
                     gamesPending  = pending,
                     report        = report,
                 )

@@ -1,23 +1,31 @@
 package com.acepero13.android.gamereviewer.ui.screens
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.ArrowBackIosNew
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -26,12 +34,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilter
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
+import com.acepero13.android.gamereviewer.domain.DAY_OPTIONS
+import com.acepero13.android.gamereviewer.domain.GAME_OPTIONS
+import org.koin.compose.koinInject
 import com.acepero13.android.gamereviewer.ui.components.AccuracyStatsCard
 import com.acepero13.android.gamereviewer.ui.components.AnalysisProgressCard
 import com.acepero13.android.gamereviewer.ui.components.BlunderCausesCard
@@ -146,6 +160,8 @@ fun AnalyticsScreen(
                 Tab(selected = tab == 6, onClick = { tab = 6 }, text = { Text("Tactics") })
             }
 
+            AnalyticsFilterBar()
+
             when (tab) {
                 0 -> DashboardContent(state = dashState, onStartDrill = onStartDrill)
                 1 -> InsightsContent(
@@ -171,6 +187,88 @@ fun AnalyticsScreen(
                 else -> TacticsContent(
                     state     = tacticsState,
                     onAnalyze = tacticsVm::analyzePendingGames,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Shared scope selector applied to every tab. Date and game-count windows are mutually
+ * exclusive: choosing one resets the other (both drive the single [AnalyticsFilter] value held
+ * by the [AnalyticsFilterStore] singleton, which every tab's ViewModel observes).
+ */
+@Composable
+private fun AnalyticsFilterBar(modifier: Modifier = Modifier) {
+    val filterStore: AnalyticsFilterStore = koinInject()
+    val filter by filterStore.filter.collectAsState()
+
+    val selectedDays  = (filter as? AnalyticsFilter.ByDays)?.days
+    val selectedGames = (filter as? AnalyticsFilter.ByGames)?.count
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterDropdown(
+            label    = selectedDays?.let { "Last $it days" } ?: "All dates",
+            options  = DAY_OPTIONS.map { it to "Last $it days" },
+            allLabel = "All dates",
+            onAll    = { filterStore.set(AnalyticsFilter.All) },
+            onPick   = { filterStore.set(AnalyticsFilter.ByDays(it)) },
+            modifier = Modifier.weight(1f),
+        )
+        FilterDropdown(
+            label    = selectedGames?.let { "Last $it games" } ?: "All games",
+            options  = GAME_OPTIONS.map { it to "Last $it games" },
+            allLabel = "All games",
+            onAll    = { filterStore.set(AnalyticsFilter.All) },
+            onPick   = { filterStore.set(AnalyticsFilter.ByGames(it)) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** A compact chip that opens a [DropdownMenu] of an "All" entry plus the supplied [options]. */
+@Composable
+private fun FilterDropdown(
+    label: String,
+    options: List<Pair<Int, String>>,
+    allLabel: String,
+    onAll: () -> Unit,
+    onPick: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val appColors = LocalAppColors.current
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier) {
+        Surface(
+            color  = appColors.background,
+            shape  = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, ChessGold),
+            modifier = Modifier.fillMaxWidth().clickable { expanded = true },
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(label, style = MaterialTheme.typography.bodyMedium, color = ChessGold)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = ChessGold)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text    = { Text(allLabel) },
+                onClick = { onAll(); expanded = false },
+            )
+            options.forEach { (value, text) ->
+                DropdownMenuItem(
+                    text    = { Text(text) },
+                    onClick = { onPick(value); expanded = false },
                 )
             }
         }
@@ -407,10 +505,22 @@ private fun ConversionContent(state: ConversionUiState, onAnalyze: () -> Unit) {
         report!!
         WhenAheadBehindCard(ahead = report.whenAhead, behind = report.whenBehind, modifier = Modifier.fillMaxWidth())
         ConversionScatterChart(
-            title = "When Ahead", points = report.winningScatter, axisMaxCp = 1000, modifier = Modifier.fillMaxWidth(),
+            title = "When Ahead",
+            points = report.winningScatter,
+            goodLabel = "Converted",
+            badLabel = "Threw",
+            readingHint = "A low median in the Threw column means wins slip away through inaccurate " +
+                "play, not bad luck.",
+            modifier = Modifier.fillMaxWidth(),
         )
         ConversionScatterChart(
-            title = "When Behind", points = report.losingScatter, axisMaxCp = 1000, modifier = Modifier.fillMaxWidth(),
+            title = "When Behind",
+            points = report.losingScatter,
+            goodLabel = "Saved",
+            badLabel = "Lost",
+            readingHint = "A high median in the Saved column shows the accuracy lift that rescues " +
+                "losing positions.",
+            modifier = Modifier.fillMaxWidth(),
         )
         NotablePositionCarousel(
             title = "Missed Simplifications",

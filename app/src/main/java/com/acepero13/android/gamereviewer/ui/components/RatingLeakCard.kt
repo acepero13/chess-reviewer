@@ -26,8 +26,8 @@ private val LeakSurface = Color(0xFF2A1719)
 private val TipSurface = Color(0xFF3A1F22)
 
 /**
- * Hero "rating leak" card: a big (estimated) ELO figure lost to blunders, the headline insight,
- * and a coaching tip. The ELO number is a deliberately rough heuristic — labelled as such.
+ * Hero "rating leak" card: a big (estimated) per-game ELO figure bled to blunders, the headline
+ * insight, and a coaching tip. The ELO number is a deliberately rough heuristic — labelled as such.
  */
 @Composable
 fun RatingLeakCard(
@@ -65,7 +65,7 @@ fun RatingLeakCard(
                         softWrap   = false,
                     )
                     Text(
-                        text  = "Est. ELO lost to blunders",
+                        text  = "Est. ELO lost per game",
                         style = MaterialTheme.typography.labelSmall,
                         color = appColors.textTertiary,
                     )

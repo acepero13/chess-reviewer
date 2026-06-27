@@ -6,6 +6,7 @@ import com.acepero13.android.gamereviewer.data.repository.GameRepository
 import com.acepero13.android.gamereviewer.data.repository.SettingsRepository
 import com.acepero13.android.gamereviewer.data.repository.SnippetRepository
 import com.acepero13.android.gamereviewer.data.repository.TriggerMasteryRepository
+import com.acepero13.android.gamereviewer.domain.AnalyticsFilterStore
 import com.acepero13.android.gamereviewer.domain.EndgameRecognizer
 import com.acepero13.android.gamereviewer.domain.MiddlegamePlanDetector
 import com.acepero13.android.gamereviewer.domain.OpeningDeviationAnalyzer
@@ -83,6 +84,7 @@ val appModule = module {
     single { EndgameRecognizer(get()) }
     single { MiddlegamePlanClassifier() }
     single { MiddlegamePlanDetector(get()) }
+    single { AnalyticsFilterStore() }
 
     // ── ViewModels ────────────────────────────────────────────────────────────
     viewModel { HomeViewModel(get(), androidContext(), get()) }
@@ -132,6 +134,7 @@ val appModule = module {
             settingsRepo      = get(),
             moveTimeDao       = get(),
             openingClassifier = get(),
+            filterStore       = get(),
         )
     }
     viewModel {
@@ -140,6 +143,7 @@ val appModule = module {
             criticalMomentDao = get(),
             repo              = get(),
             context           = androidContext(),
+            filterStore       = get(),
         )
     }
     viewModel {
@@ -148,6 +152,7 @@ val appModule = module {
             criticalMomentDao = get(),
             repo              = get(),
             context           = androidContext(),
+            filterStore       = get(),
         )
     }
     viewModel {
@@ -156,6 +161,7 @@ val appModule = module {
             notablePositionDao = get(),
             repo               = get(),
             context            = androidContext(),
+            filterStore        = get(),
         )
     }
     viewModel {
@@ -164,6 +170,7 @@ val appModule = module {
             moveTimeDao  = get(),
             repo         = get(),
             context      = androidContext(),
+            filterStore  = get(),
         )
     }
     viewModel {
@@ -171,6 +178,7 @@ val appModule = module {
             gameStatsDao = get(),
             repo         = get(),
             context      = androidContext(),
+            filterStore  = get(),
         )
     }
     viewModel {
@@ -180,6 +188,7 @@ val appModule = module {
             notablePositionDao = get(),
             repo               = get(),
             context            = androidContext(),
+            filterStore        = get(),
         )
     }
     viewModel { SessionDebriefViewModel(get(), get(), get(), get()) }
